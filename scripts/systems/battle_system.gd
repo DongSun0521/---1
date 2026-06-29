@@ -84,13 +84,32 @@ const ENCOUNTERS := {
 			},
 		],
 	},
+	&"ruins_guard": {
+		"display_name": "遗迹守卫",
+		"node_id": &"ruins_entrance",
+		"reward_ore": 5,
+		"reward_herb": 3,
+		"reward_core": 1,
+		"is_boss": true,
+		"enemies": [
+			{
+				"unit_id": &"ruins_guard",
+				"display_name": "遗迹守卫",
+				"max_hp": 100,
+				"attack": 10,
+				"defense": 3,
+				"speed": 4,
+				"ai_type": "boss",
+			},
+		],
+	},
 }
 
 
-func create_initial_party_states() -> Array:
+func create_initial_party_states(attack_bonus: int = 0, max_hp_bonus: int = 0) -> Array:
 	var party_states: Array = []
 	for config: Dictionary in PARTY_CONFIGS:
-		party_states.append(create_party_unit_state(config))
+		party_states.append(create_party_unit_state(config, attack_bonus, max_hp_bonus))
 	return party_states
 
 
@@ -197,15 +216,17 @@ func restore_party_full(party_states: Array) -> Array:
 	return restored
 
 
-func create_party_unit_state(config: Dictionary) -> Dictionary:
+func create_party_unit_state(config: Dictionary, attack_bonus: int = 0, max_hp_bonus: int = 0) -> Dictionary:
 	return {
 		"unit_id": config["unit_id"],
 		"display_name": config["display_name"],
 		"role": config["role"],
 		"is_player_unit": true,
-		"max_hp": int(config["max_hp"]),
-		"current_hp": int(config["max_hp"]),
-		"attack": int(config["attack"]),
+		"base_max_hp": int(config["max_hp"]),
+		"base_attack": int(config["attack"]),
+		"max_hp": int(config["max_hp"]) + max_hp_bonus,
+		"current_hp": int(config["max_hp"]) + max_hp_bonus,
+		"attack": int(config["attack"]) + attack_bonus,
 		"defense": int(config["defense"]),
 		"speed": int(config["speed"]),
 		"skill_name": config["skill_name"],
@@ -230,6 +251,8 @@ func create_enemy_states(encounter: Dictionary) -> Array:
 			"attack": int(enemy_config["attack"]),
 			"defense": int(enemy_config["defense"]),
 			"speed": int(enemy_config["speed"]),
+			"ai_type": String(enemy_config.get("ai_type", "normal")),
+			"action_count": 0,
 			"skill_cooldown": 0,
 			"is_defending": false,
 		})
@@ -407,12 +430,33 @@ func prepare_player_turn(game_state, unit: Dictionary) -> void:
 
 func execute_enemy_turn(game_state, enemy: Dictionary) -> void:
 	var battle_state: Dictionary = game_state.battle_state
+	enemy["action_count"] = int(enemy.get("action_count", 0)) + 1
+	if String(enemy.get("ai_type", "normal")) == "boss" and int(enemy["action_count"]) % 3 == 0:
+		var party_states: Array = battle_state["party_states"]
+		for index in range(party_states.size()):
+			var shockwave_target: Dictionary = party_states[index]
+			if is_unit_defeated(shockwave_target):
+				continue
+			var shockwave_damage := calculate_damage(int(enemy["attack"]), int(shockwave_target["defense"]), bool(shockwave_target.get("is_defending", false)))
+			apply_damage(shockwave_target, shockwave_damage)
+			party_states[index] = shockwave_target
+			append_log(battle_state, "%s释放震荡波，对%s造成%d点伤害。" % [
+				String(enemy["display_name"]),
+				String(shockwave_target["display_name"]),
+				shockwave_damage,
+			])
+		battle_state["party_states"] = party_states
+		set_unit_by_id(battle_state["enemy_states"], enemy)
+		game_state.battle_state = battle_state
+		return
+
 	var target := get_first_alive_party_unit(battle_state)
 	if target.is_empty():
 		return
 	var damage := calculate_damage(int(enemy["attack"]), int(target["defense"]), bool(target.get("is_defending", false)))
 	apply_damage(target, damage)
 	set_unit_by_id(battle_state["party_states"], target)
+	set_unit_by_id(battle_state["enemy_states"], enemy)
 	append_log(battle_state, "%s攻击%s，造成%d点伤害。" % [
 		String(enemy["display_name"]),
 		String(target["display_name"]),
@@ -446,12 +490,25 @@ func finish_battle(game_state, outcome: String) -> Dictionary:
 		"party_states": battle_state["party_states"].duplicate(true),
 		"enemy_states": battle_state["enemy_states"].duplicate(true),
 		"reward_ore": 0,
+		"reward_herb": 0,
+		"reward_core": 0,
+		"is_boss": false,
 	}
 	if outcome == "victory":
 		var encounter: Dictionary = ENCOUNTERS[battle_state["encounter_id"]]
-		result["reward_ore"] = int(encounter["reward_ore"])
+		result["reward_ore"] = int(encounter.get("reward_ore", 0))
+		result["reward_herb"] = int(encounter.get("reward_herb", 0))
+		result["reward_core"] = int(encounter.get("reward_core", 0))
+		result["is_boss"] = bool(encounter.get("is_boss", false))
 		battle_state["reward_granted"] = true
-		append_log(battle_state, "战斗胜利，获得临时矿石 +%d。" % int(result["reward_ore"]))
+		if bool(result["is_boss"]):
+			append_log(battle_state, "Boss战胜利，获得核心 +%d、矿石 +%d、草药 +%d。" % [
+				int(result["reward_core"]),
+				int(result["reward_ore"]),
+				int(result["reward_herb"]),
+			])
+		else:
+			append_log(battle_state, "战斗胜利，获得临时矿石 +%d。" % int(result["reward_ore"]))
 	else:
 		append_log(battle_state, "冒险队全员倒下，远征失败。")
 

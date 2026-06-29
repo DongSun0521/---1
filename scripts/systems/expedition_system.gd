@@ -52,9 +52,9 @@ const MAP_NODES := {
 	},
 	&"ruins_entrance": {
 		"display_name": "遗迹入口",
-		"description": "前方区域暂未开放。\n下一阶段将加入战斗与敌人。",
+		"description": "遗迹门前站着最终守卫。\n进入后将触发Boss战。",
 		"next_node_id": &"",
-		"encounter_id": &"",
+		"encounter_id": &"ruins_guard",
 		"gather_resource": "",
 		"gather_amount": 0,
 		"gather_label": "",
@@ -76,6 +76,7 @@ func create_initial_state() -> Dictionary:
 		"carried_medicine": 0,
 		"cargo_ore": 0,
 		"cargo_herb": 0,
+		"cargo_core": 0,
 		"collected_node_ids": [],
 		"cleared_battle_node_ids": [],
 		"battle_count": 0,
@@ -228,6 +229,7 @@ func return_to_village(game_state) -> Dictionary:
 	var medicine_returned := int(state["carried_medicine"])
 	var ore_gained := int(state["cargo_ore"])
 	var herb_gained := int(state["cargo_herb"])
+	var core_gained := int(state.get("cargo_core", 0))
 	var report := {
 		"duration_days": int(state["expedition_day_count"]),
 		"furthest_node_id": state["furthest_node_id"],
@@ -240,6 +242,7 @@ func return_to_village(game_state) -> Dictionary:
 		"medicine_returned": medicine_returned,
 		"ore_gained": ore_gained,
 		"herb_gained": herb_gained,
+		"core_gained": core_gained,
 		"village_food_produced": int(state["village_food_produced"]),
 		"village_food_consumed": int(state["village_food_consumed"]),
 		"village_medicine_produced": int(state["village_medicine_produced"]),
@@ -250,7 +253,9 @@ func return_to_village(game_state) -> Dictionary:
 	resources["medicine"] = int(resources["medicine"]) + medicine_returned
 	resources["ore"] = int(resources["ore"]) + ore_gained
 	resources["herb"] = int(resources["herb"]) + herb_gained
+	resources["boss_core"] = int(resources.get("boss_core", 0)) + core_gained
 	game_state.resources = resources
+	game_state.core_material = int(game_state.core_material) + core_gained
 	game_state.last_expedition_report = report
 	game_state.last_expedition_action_report = {}
 	game_state.expedition_state = create_initial_state()
@@ -265,7 +270,9 @@ func apply_battle_victory(game_state, result: Dictionary) -> void:
 	var cleared_battle_node_ids: Array = state["cleared_battle_node_ids"]
 	if not cleared_battle_node_ids.has(node_id):
 		cleared_battle_node_ids.append(node_id)
-		state["cargo_ore"] = int(state["cargo_ore"]) + int(result["reward_ore"])
+		state["cargo_ore"] = int(state["cargo_ore"]) + int(result.get("reward_ore", 0))
+		state["cargo_herb"] = int(state["cargo_herb"]) + int(result.get("reward_herb", 0))
+		state["cargo_core"] = int(state.get("cargo_core", 0)) + int(result.get("reward_core", 0))
 		state["battle_count"] = int(state["battle_count"]) + 1
 	state["cleared_battle_node_ids"] = cleared_battle_node_ids
 	game_state.expedition_state = state
@@ -291,6 +298,7 @@ func apply_battle_failure(game_state, _result: Dictionary) -> Dictionary:
 		"medicine_returned": 0,
 		"ore_gained": ore_gained,
 		"herb_gained": herb_gained,
+		"core_gained": 0,
 		"village_food_produced": int(state["village_food_produced"]),
 		"village_food_consumed": int(state["village_food_consumed"]),
 		"village_medicine_produced": int(state["village_medicine_produced"]),
@@ -370,6 +378,8 @@ func get_node_encounter_id(node_id: StringName) -> StringName:
 
 
 func is_battle_node_cleared(game_state, node_id: StringName) -> bool:
+	if node_id == &"ruins_entrance" and bool(game_state.boss_defeated):
+		return true
 	var state: Dictionary = game_state.expedition_state
 	var cleared_battle_node_ids: Array = state.get("cleared_battle_node_ids", [])
 	return cleared_battle_node_ids.has(node_id)
@@ -397,4 +407,6 @@ func create_action_report(daily_report: Dictionary, state: Dictionary) -> Dictio
 		"carried_medicine": int(state["carried_medicine"]),
 		"cargo_ore": int(state["cargo_ore"]),
 		"cargo_herb": int(state["cargo_herb"]),
+		"cargo_core": int(state.get("cargo_core", 0)),
+		"project_report": daily_report.get("project_report", {}).duplicate(true),
 	}

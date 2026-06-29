@@ -16,10 +16,18 @@ signal battle_started(encounter_id: StringName)
 signal battle_state_changed
 signal active_unit_changed(unit_id: StringName)
 signal battle_finished(result: Dictionary)
+signal project_started(report: Dictionary)
+signal project_progress_changed(report: Dictionary)
+signal project_completed(report: Dictionary)
+signal village_upgrades_changed
+signal party_upgrades_changed
+signal boss_defeated_changed
+signal mvp_completed(summary: Dictionary)
 
 const VillageSystemScript := preload("res://scripts/systems/village_system.gd")
 const ExpeditionSystemScript := preload("res://scripts/systems/expedition_system.gd")
 const BattleSystemScript := preload("res://scripts/systems/battle_system.gd")
+const ProjectSystemScript := preload("res://scripts/systems/project_system.gd")
 
 const INITIAL_DAY := 1
 const INITIAL_RESOURCES := {
@@ -97,11 +105,19 @@ var last_daily_report: Dictionary = {}
 var village_system: RefCounted = VillageSystemScript.new()
 var expedition_system: RefCounted = ExpeditionSystemScript.new()
 var battle_system: RefCounted = BattleSystemScript.new()
+var project_system: RefCounted = ProjectSystemScript.new()
 var expedition_state: Dictionary = {}
 var last_expedition_action_report: Dictionary = {}
 var last_expedition_report: Dictionary = {}
 var battle_state: Dictionary = {}
 var last_battle_result: Dictionary = {}
+var project_state: Dictionary = {}
+var party_attack_bonus: int = 0
+var party_max_hp_bonus: int = 0
+var boss_defeated: bool = false
+var core_material: int = 0
+var mvp_has_completed: bool = false
+var statistics: Dictionary = {}
 
 
 func _ready() -> void:
@@ -111,8 +127,20 @@ func _ready() -> void:
 func start_new_game() -> void:
 	current_day = INITIAL_DAY
 	resources = INITIAL_RESOURCES.duplicate(true)
-	adventurers = battle_system.create_initial_party_states()
 	buildings = INITIAL_BUILDINGS.duplicate(true)
+	project_state = project_system.create_initial_state()
+	party_attack_bonus = 0
+	party_max_hp_bonus = 0
+	boss_defeated = false
+	core_material = 0
+	mvp_has_completed = false
+	statistics = {
+		"total_expeditions_started": 0,
+		"total_failed_expeditions": 0,
+		"total_battles_won": 0,
+		"total_projects_completed": 0,
+	}
+	adventurers = battle_system.create_initial_party_states(party_attack_bonus, party_max_hp_bonus)
 	last_daily_report = {}
 	expedition_state = expedition_system.create_initial_state()
 	last_expedition_action_report = {}
@@ -126,6 +154,10 @@ func start_new_game() -> void:
 	supplies_changed.emit()
 	expedition_state_changed.emit()
 	battle_state_changed.emit()
+	project_progress_changed.emit({})
+	village_upgrades_changed.emit()
+	party_upgrades_changed.emit()
+	boss_defeated_changed.emit()
 	daily_report_generated.emit(last_daily_report.duplicate(true))
 	state_changed.emit()
 
@@ -134,6 +166,7 @@ func advance_day(reason: String = "manual_test", emit_signals: bool = true) -> D
 	var settled_day: int = current_day
 	last_daily_report = village_system.process_daily_village(self)
 	var expedition_daily_report: Dictionary = expedition_system.process_daily_consumption(self, last_daily_report)
+	var project_daily_report: Dictionary = project_system.process_daily_project(self)
 	current_day = settled_day + 1
 	last_daily_report["reason"] = reason
 	last_daily_report["settled_day"] = settled_day
@@ -141,6 +174,7 @@ func advance_day(reason: String = "manual_test", emit_signals: bool = true) -> D
 	last_daily_report["expedition_food_consumed"] = int(expedition_daily_report["expedition_food_consumed"])
 	last_daily_report["expedition_day_count"] = int(expedition_daily_report["expedition_day_count"])
 	last_daily_report["carried_food_after"] = int(expedition_daily_report.get("carried_food_after", 0))
+	last_daily_report["project_report"] = project_daily_report.duplicate(true)
 
 	if emit_signals:
 		emit_after_day_advanced()
@@ -162,6 +196,43 @@ func add_resource(resource_id: String, amount: int) -> void:
 	resources[resource_id] = max(0, int(resources[resource_id]) + amount)
 	emit_resources_changed()
 	state_changed.emit()
+
+
+func get_project_ids() -> Array[StringName]:
+	return project_system.get_all_project_ids()
+
+
+func get_project_config(project_id: StringName) -> Dictionary:
+	return project_system.get_project_config(project_id).duplicate(true)
+
+
+func get_project_state() -> Dictionary:
+	return project_state.duplicate(true)
+
+
+func get_active_project_summary() -> String:
+	return project_system.get_active_project_summary(self)
+
+
+func can_start_project(project_id: StringName) -> bool:
+	return project_system.can_start_project(self, project_id)
+
+
+func get_project_start_error(project_id: StringName) -> String:
+	return project_system.get_start_error(self, project_id)
+
+
+func start_project(project_id: StringName) -> bool:
+	var report: Dictionary = project_system.start_project(self, project_id)
+	if not bool(report.get("success", false)):
+		project_started.emit(report.duplicate(true))
+		return false
+
+	emit_resources_changed()
+	project_started.emit(report.duplicate(true))
+	project_progress_changed.emit(report.duplicate(true))
+	state_changed.emit()
+	return true
 
 
 func get_building_state(building_id: StringName) -> Dictionary:
@@ -193,6 +264,7 @@ func start_expedition(carried_food: int, carried_medicine: int) -> bool:
 	if not expedition_system.start_expedition(self, carried_food, carried_medicine):
 		return false
 
+	statistics["total_expeditions_started"] = int(statistics.get("total_expeditions_started", 0)) + 1
 	emit_resources_changed()
 	supplies_changed.emit()
 	expedition_state_changed.emit()
@@ -231,6 +303,7 @@ func return_from_expedition() -> bool:
 	if report.is_empty():
 		return false
 
+	var should_complete_mvp: bool = int(report.get("core_gained", 0)) > 0 and not mvp_has_completed
 	adventurers = battle_system.restore_party_full(adventurers)
 	emit_resources_changed()
 	supplies_changed.emit()
@@ -238,6 +311,9 @@ func return_from_expedition() -> bool:
 	battle_state_changed.emit()
 	current_node_changed.emit(expedition_state["current_node_id"])
 	expedition_ended.emit(report.duplicate(true))
+	if should_complete_mvp:
+		mvp_has_completed = true
+		mvp_completed.emit(get_mvp_summary())
 	state_changed.emit()
 	return true
 
@@ -323,11 +399,16 @@ func execute_battle_action(action_id: StringName, target_id: StringName = &"") -
 func process_battle_result(result: Dictionary) -> void:
 	last_battle_result = result.duplicate(true)
 	if String(result["outcome"]) == "victory":
+		statistics["total_battles_won"] = int(statistics.get("total_battles_won", 0)) + 1
 		expedition_system.apply_battle_victory(self, result)
+		if bool(result.get("is_boss", false)):
+			boss_defeated = true
+			boss_defeated_changed.emit()
 		supplies_changed.emit()
 		expedition_state_changed.emit()
 	else:
 		var report: Dictionary = expedition_system.apply_battle_failure(self, result)
+		statistics["total_failed_expeditions"] = int(statistics.get("total_failed_expeditions", 0)) + 1
 		adventurers = battle_system.restore_party_full(adventurers)
 		emit_resources_changed()
 		supplies_changed.emit()
@@ -372,12 +453,13 @@ func is_current_battle_node_cleared() -> bool:
 
 
 func get_resource_summary() -> String:
-	return "第 %d 天 | 粮食 %d | 药品 %d | 矿石 %d | 草药 %d" % [
+	return "第 %d 天 | 粮食 %d | 药品 %d | 矿石 %d | 草药 %d | 核心 %d" % [
 		current_day,
 		get_resource_amount("food"),
 		get_resource_amount("medicine"),
 		get_resource_amount("ore"),
 		get_resource_amount("herb"),
+		get_resource_amount("boss_core"),
 	]
 
 
@@ -392,6 +474,29 @@ func get_adventurer_summary() -> String:
 			int(adventurer["defense"]),
 		])
 	return "\n".join(lines)
+
+
+func get_growth_summary() -> Dictionary:
+	return {
+		"farm_level": int(buildings.get("farm", {}).get("level", 1)),
+		"farm_daily_food": int(buildings.get("farm", {}).get("daily_food_production", 4)),
+		"clinic_level": int(buildings.get("clinic", {}).get("level", 1)),
+		"clinic_progress_required": int(buildings.get("clinic", {}).get("medicine_progress_required", 2)),
+		"party_attack_bonus": party_attack_bonus,
+		"party_max_hp_bonus": party_max_hp_bonus,
+		"active_project": get_active_project_summary(),
+		"completed_projects": project_state.get("completed_project_ids", []).duplicate(true),
+	}
+
+
+func get_mvp_summary() -> Dictionary:
+	return {
+		"current_day": current_day,
+		"core_material": core_material,
+		"boss_defeated": boss_defeated,
+		"statistics": statistics.duplicate(true),
+		"growth": get_growth_summary(),
+	}
 
 
 func emit_resources_changed() -> void:
@@ -413,6 +518,13 @@ func emit_after_day_advanced() -> void:
 	emit_day_changed()
 	day_advanced.emit(current_day)
 	daily_report_generated.emit(last_daily_report.duplicate(true))
+	var project_report: Dictionary = last_daily_report.get("project_report", {})
+	if bool(project_report.get("had_active_project", false)):
+		project_progress_changed.emit(project_report.duplicate(true))
+	if bool(project_report.get("project_completed", false)):
+		project_completed.emit(project_report.duplicate(true))
+		village_upgrades_changed.emit()
+		party_upgrades_changed.emit()
 	if is_expedition_active():
 		supplies_changed.emit()
 		expedition_state_changed.emit()
