@@ -1,0 +1,20 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/top_resource_bar.gd" id="1"]
+
+[node name="TopResourceBar" type="PanelContainer"]
+custom_minimum_size = Vector2(0, 44)
+script = ExtResource("1")
+
+[node name="Margin" type="MarginContainer" parent="."]
+layout_mode = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 8
+
+[node name="ResourceLabel" type="Label" parent="Margin"]
+layout_mode = 2
+text = "第 1 天 | 粮食 20 | 药品 3 | 矿石 0 | 草药 0"
+horizontal_alignment = 1
+vertical_alignment = 1

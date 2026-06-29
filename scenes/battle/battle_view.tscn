@@ -1,0 +1,130 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/battle_view.gd" id="1"]
+
+[node name="BattleView" type="MarginContainer"]
+script = ExtResource("1")
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
+
+[node name="Content" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="Content"]
+layout_mode = 2
+text = "战斗"
+horizontal_alignment = 1
+
+[node name="TurnLabel" type="Label" parent="Content"]
+layout_mode = 2
+text = "第1回合"
+
+[node name="Units" type="HBoxContainer" parent="Content"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="PartyPanel" type="PanelContainer" parent="Content/Units"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="PartyMargin" type="MarginContainer" parent="Content/Units/PartyPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="PartyLabel" type="Label" parent="Content/Units/PartyPanel/PartyMargin"]
+layout_mode = 2
+
+[node name="EnemyPanel" type="PanelContainer" parent="Content/Units"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="EnemyMargin" type="MarginContainer" parent="Content/Units/EnemyPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="EnemyLabel" type="Label" parent="Content/Units/EnemyPanel/EnemyMargin"]
+layout_mode = 2
+
+[node name="Actions" type="HBoxContainer" parent="Content"]
+layout_mode = 2
+alignment = 1
+
+[node name="AttackButton" type="Button" parent="Content/Actions"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "普通攻击"
+
+[node name="SkillButton" type="Button" parent="Content/Actions"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "使用技能"
+
+[node name="DefendButton" type="Button" parent="Content/Actions"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "防御"
+
+[node name="MedicineButton" type="Button" parent="Content/Actions"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "使用药品"
+
+[node name="TargetPanel" type="PanelContainer" parent="Content"]
+layout_mode = 2
+
+[node name="TargetMargin" type="MarginContainer" parent="Content/TargetPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="TargetContent" type="VBoxContainer" parent="Content/TargetPanel/TargetMargin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="TargetTitle" type="Label" parent="Content/TargetPanel/TargetMargin/TargetContent"]
+layout_mode = 2
+text = "选择目标"
+
+[node name="TargetButtons" type="HBoxContainer" parent="Content/TargetPanel/TargetMargin/TargetContent"]
+layout_mode = 2
+
+[node name="TargetButton1" type="Button" parent="Content/TargetPanel/TargetMargin/TargetContent/TargetButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="TargetButton2" type="Button" parent="Content/TargetPanel/TargetMargin/TargetContent/TargetButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="TargetButton3" type="Button" parent="Content/TargetPanel/TargetMargin/TargetContent/TargetButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="TargetButton4" type="Button" parent="Content/TargetPanel/TargetMargin/TargetContent/TargetButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="LogPanel" type="PanelContainer" parent="Content"]
+layout_mode = 2
+
+[node name="LogMargin" type="MarginContainer" parent="Content/LogPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="LogLabel" type="Label" parent="Content/LogPanel/LogMargin"]
+layout_mode = 2
+text = "尚未进入战斗。"
