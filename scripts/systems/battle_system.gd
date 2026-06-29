@@ -477,7 +477,6 @@ func append_turn_entries(entries: Array, units: Array, is_player_unit: bool) -> 
 		var unit: Dictionary = units[index]
 		if is_unit_defeated(unit):
 			continue
-		}
 		entries.append({
 			"unit_id": unit["unit_id"],
 			"is_player_unit": is_player_unit,

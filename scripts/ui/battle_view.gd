@@ -131,7 +131,7 @@ func select_target(index: int) -> void:
 
 
 func refresh_targets() -> void:
-	var should_show := selected_action != &"" and current_targets.size() > 0 and game_state.is_battle_active()
+	var should_show: bool = selected_action != &"" and current_targets.size() > 0 and game_state.is_battle_active()
 	target_panel.visible = should_show
 	for index in range(target_buttons.size()):
 		var button := target_buttons[index]
