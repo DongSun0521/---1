@@ -176,14 +176,13 @@ func format_party(party_states: Array) -> String:
 			status = "倒下"
 		elif bool(unit.get("is_defending", false)):
 			status = "防御中"
-		lines.append("%s\n生命：%d / %d\n技能冷却：%d\n状态：%s" % [
+		lines.append("%s  生命：%d/%d  冷却：%d  %s" % [
 			String(unit["display_name"]),
 			int(unit["current_hp"]),
 			int(unit["max_hp"]),
 			int(unit.get("skill_cooldown", 0)),
 			status,
 		])
-		lines.append("")
 	return "\n".join(lines)
 
 
@@ -193,14 +192,13 @@ func format_enemies(enemy_states: Array) -> String:
 	lines.append("")
 	for enemy: Dictionary in enemy_states:
 		if int(enemy["current_hp"]) <= 0:
-			lines.append("%s\n已击败" % String(enemy["display_name"]))
+			lines.append("%s：已击败" % String(enemy["display_name"]))
 		else:
-			lines.append("%s\n生命：%d / %d" % [
+			lines.append("%s  生命：%d/%d" % [
 				String(enemy["display_name"]),
 				int(enemy["current_hp"]),
 				int(enemy["max_hp"]),
 			])
-		lines.append("")
 	return "\n".join(lines)
 
 
