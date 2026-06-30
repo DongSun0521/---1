@@ -1,6 +1,6 @@
 [gd_scene load_steps=2 format=3]
 
-[ext_resource type="Script" path="res://scripts/ui/battle_view.gd" id="1"]
+[ext_resource type="Script" path="res://features/battle/battle_view.gd" id="1"]
 
 [node name="BattleView" type="MarginContainer"]
 script = ExtResource("1")

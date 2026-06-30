@@ -16,6 +16,7 @@ var new_game_button: Button
 func _ready() -> void:
 	game_state = get_node("/root/GameState")
 	setup_mvp_panel()
+	apply_visual_style()
 	village_button.pressed.connect(show_village)
 	expedition_button.pressed.connect(show_expedition)
 	game_state.expedition_started.connect(show_expedition)
@@ -24,6 +25,12 @@ func _ready() -> void:
 	game_state.battle_finished.connect(on_battle_finished)
 	game_state.mvp_completed.connect(show_mvp_completed)
 	show_village()
+
+
+func apply_visual_style() -> void:
+	for button: Button in [village_button, expedition_button]:
+		button.custom_minimum_size = Vector2(180, 48)
+		button.add_theme_font_size_override("font_size", 22)
 
 
 func _exit_tree() -> void:

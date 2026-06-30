@@ -24,10 +24,10 @@ signal party_upgrades_changed
 signal boss_defeated_changed
 signal mvp_completed(summary: Dictionary)
 
-const VillageSystemScript := preload("res://scripts/systems/village_system.gd")
-const ExpeditionSystemScript := preload("res://scripts/systems/expedition_system.gd")
-const BattleSystemScript := preload("res://scripts/systems/battle_system.gd")
-const ProjectSystemScript := preload("res://scripts/systems/project_system.gd")
+const VillageSystemScript := preload("res://systems/village_system.gd")
+const ExpeditionSystemScript := preload("res://systems/expedition_system.gd")
+const BattleSystemScript := preload("res://systems/battle_system.gd")
+const ProjectSystemScript := preload("res://systems/project_system.gd")
 
 const INITIAL_DAY := 1
 const INITIAL_RESOURCES := {
