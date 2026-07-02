@@ -3,88 +3,10 @@
 [ext_resource type="Script" path="res://features/expedition/expedition_view.gd" id="1"]
 
 [node name="ExpeditionView" type="MarginContainer"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 script = ExtResource("1")
-theme_override_constants/margin_left = 8
-theme_override_constants/margin_top = 8
-theme_override_constants/margin_right = 8
-theme_override_constants/margin_bottom = 8
-
-[node name="Content" type="VBoxContainer" parent="."]
-layout_mode = 2
-theme_override_constants/separation = 12
-
-[node name="Title" type="Label" parent="Content"]
-layout_mode = 2
-text = "冒险"
-horizontal_alignment = 1
-
-[node name="TimeLabel" type="Label" parent="Content"]
-layout_mode = 2
-text = "当前时间：第1天"
-
-[node name="LocationLabel" type="Label" parent="Content"]
-layout_mode = 2
-text = "当前位置：村庄出口"
-
-[node name="NodeDescriptionLabel" type="Label" parent="Content"]
-layout_mode = 2
-text = "远征开始位置。"
-
-[node name="Actions" type="HBoxContainer" parent="Content"]
-layout_mode = 2
-alignment = 1
-
-[node name="NextButton" type="Button" parent="Content/Actions"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "前往下一节点"
-
-[node name="GatherButton" type="Button" parent="Content/Actions"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "采集"
-
-[node name="ReturnButton" type="Button" parent="Content/Actions"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "返回村庄"
-
-[node name="SuppliesPanel" type="PanelContainer" parent="Content"]
-layout_mode = 2
-
-[node name="SuppliesMargin" type="MarginContainer" parent="Content/SuppliesPanel"]
-layout_mode = 2
-theme_override_constants/margin_left = 12
-theme_override_constants/margin_top = 10
-theme_override_constants/margin_right = 12
-theme_override_constants/margin_bottom = 10
-
-[node name="SuppliesLabel" type="Label" parent="Content/SuppliesPanel/SuppliesMargin"]
-layout_mode = 2
-
-[node name="VillagePanel" type="PanelContainer" parent="Content"]
-layout_mode = 2
-
-[node name="VillageMargin" type="MarginContainer" parent="Content/VillagePanel"]
-layout_mode = 2
-theme_override_constants/margin_left = 12
-theme_override_constants/margin_top = 10
-theme_override_constants/margin_right = 12
-theme_override_constants/margin_bottom = 10
-
-[node name="VillageStatusLabel" type="Label" parent="Content/VillagePanel/VillageMargin"]
-layout_mode = 2
-
-[node name="BriefingPanel" type="PanelContainer" parent="Content"]
-layout_mode = 2
-
-[node name="BriefingMargin" type="MarginContainer" parent="Content/BriefingPanel"]
-layout_mode = 2
-theme_override_constants/margin_left = 12
-theme_override_constants/margin_top = 10
-theme_override_constants/margin_right = 12
-theme_override_constants/margin_bottom = 10
-
-[node name="BriefingLabel" type="Label" parent="Content/BriefingPanel/BriefingMargin"]
-layout_mode = 2
-text = "尚未进行野外行动。"

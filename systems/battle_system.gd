@@ -6,60 +6,6 @@ const PLAYER_ACTION_SKILL := &"skill"
 const PLAYER_ACTION_DEFEND := &"defend"
 const PLAYER_ACTION_MEDICINE := &"medicine"
 
-const PARTY_CONFIGS := [
-	{
-		"unit_id": &"guard",
-		"display_name": "阿盾",
-		"role": "守卫",
-		"max_hp": 40,
-		"attack": 6,
-		"defense": 5,
-		"speed": 3,
-		"skill_name": "盾击",
-		"skill_cooldown_duration": 2,
-		"skill_type": "single_damage",
-		"skill_multiplier": 1.2,
-	},
-	{
-		"unit_id": &"hunter",
-		"display_name": "林羽",
-		"role": "猎人",
-		"max_hp": 26,
-		"attack": 8,
-		"defense": 2,
-		"speed": 7,
-		"skill_name": "强力射击",
-		"skill_cooldown_duration": 2,
-		"skill_type": "single_damage",
-		"skill_multiplier": 1.8,
-	},
-	{
-		"unit_id": &"mage",
-		"display_name": "米娅",
-		"role": "法师",
-		"max_hp": 22,
-		"attack": 7,
-		"defense": 1,
-		"speed": 5,
-		"skill_name": "奥术冲击",
-		"skill_cooldown_duration": 3,
-		"skill_type": "aoe_damage",
-		"skill_multiplier": 0.8,
-	},
-	{
-		"unit_id": &"doctor",
-		"display_name": "露娜",
-		"role": "医师",
-		"max_hp": 24,
-		"attack": 4,
-		"defense": 2,
-		"speed": 6,
-		"skill_name": "治疗术",
-		"skill_cooldown_duration": 2,
-		"skill_type": "heal",
-		"skill_heal_amount": 10,
-	},
-]
 const ENCOUNTERS := {
 	&"forest_slime_pair": {
 		"display_name": "森林边缘",
@@ -106,11 +52,11 @@ const ENCOUNTERS := {
 }
 
 
-func create_initial_party_states(attack_bonus: int = 0, max_hp_bonus: int = 0) -> Array:
-	var party_states: Array = []
-	for config: Dictionary in PARTY_CONFIGS:
-		party_states.append(create_party_unit_state(config, attack_bonus, max_hp_bonus))
-	return party_states
+func create_initial_party_states(game_state = null) -> Array:
+	if game_state != null and game_state.has_method("rebuild_adventurers_from_character_data"):
+		game_state.rebuild_adventurers_from_character_data(false)
+		return game_state.adventurers.duplicate(true)
+	return []
 
 
 func create_initial_state() -> Dictionary:
@@ -129,6 +75,7 @@ func create_initial_state() -> Dictionary:
 		"reward_granted": false,
 		"result_processed": false,
 		"last_result": {},
+		"presentation_events": [],
 	}
 
 
@@ -139,9 +86,17 @@ func start_battle(game_state, encounter_id: StringName) -> bool:
 		return false
 
 	var encounter: Dictionary = ENCOUNTERS[encounter_id]
+	if game_state.has_method("rebuild_adventurers_from_character_data"):
+		game_state.rebuild_adventurers_from_character_data(false)
 	var party_states: Array = game_state.adventurers.duplicate(true)
-	for party_unit: Dictionary in party_states:
+	for index in range(party_states.size()):
+		var party_unit: Dictionary = party_states[index]
 		party_unit["is_defending"] = false
+		if game_state != null and game_state.equipment_system != null:
+			var character_id := StringName(party_unit.get("character_id", party_unit.get("unit_id", EMPTY_ID)))
+			var snapshot: Dictionary = game_state.equipment_system.create_battle_equipment_snapshot(game_state, character_id)
+			party_unit = game_state.equipment_system.apply_battle_equipment_snapshot(party_unit, snapshot)
+		party_states[index] = party_unit
 
 	var enemy_states := create_enemy_states(encounter)
 	var battle_state := create_initial_state()
@@ -166,14 +121,15 @@ func execute_player_action(game_state, action_id: StringName, target_id: StringN
 	if active_unit.is_empty() or not bool(active_unit["is_player_unit"]):
 		return {"success": false}
 
+	battle_state["presentation_events"] = []
 	var action_success := false
 	match action_id:
 		PLAYER_ACTION_BASIC_ATTACK:
-			action_success = execute_basic_attack(battle_state, active_unit, target_id)
+			action_success = execute_basic_attack(game_state, battle_state, active_unit, target_id)
 		PLAYER_ACTION_SKILL:
-			action_success = execute_skill(battle_state, active_unit, target_id)
+			action_success = execute_skill(game_state, battle_state, active_unit, target_id)
 		PLAYER_ACTION_DEFEND:
-			action_success = execute_defend(battle_state, active_unit)
+			action_success = execute_defend(game_state, battle_state, active_unit)
 		PLAYER_ACTION_MEDICINE:
 			action_success = execute_medicine(game_state, battle_state, active_unit, target_id)
 
@@ -181,6 +137,8 @@ func execute_player_action(game_state, action_id: StringName, target_id: StringN
 		game_state.battle_state = battle_state
 		return {"success": false}
 
+	if action_id != PLAYER_ACTION_SKILL:
+		tick_player_skill_cooldown_after_action(battle_state, StringName(active_unit["unit_id"]))
 	game_state.battle_state = battle_state
 	return finish_action_and_advance(game_state)
 
@@ -216,29 +174,6 @@ func restore_party_full(party_states: Array) -> Array:
 	return restored
 
 
-func create_party_unit_state(config: Dictionary, attack_bonus: int = 0, max_hp_bonus: int = 0) -> Dictionary:
-	return {
-		"unit_id": config["unit_id"],
-		"display_name": config["display_name"],
-		"role": config["role"],
-		"is_player_unit": true,
-		"base_max_hp": int(config["max_hp"]),
-		"base_attack": int(config["attack"]),
-		"max_hp": int(config["max_hp"]) + max_hp_bonus,
-		"current_hp": int(config["max_hp"]) + max_hp_bonus,
-		"attack": int(config["attack"]) + attack_bonus,
-		"defense": int(config["defense"]),
-		"speed": int(config["speed"]),
-		"skill_name": config["skill_name"],
-		"skill_type": config["skill_type"],
-		"skill_multiplier": float(config.get("skill_multiplier", 0.0)),
-		"skill_heal_amount": int(config.get("skill_heal_amount", 0)),
-		"skill_cooldown_duration": int(config["skill_cooldown_duration"]),
-		"skill_cooldown": 0,
-		"is_defending": false,
-	}
-
-
 func create_enemy_states(encounter: Dictionary) -> Array:
 	var enemy_states: Array = []
 	for enemy_config: Dictionary in encounter["enemies"]:
@@ -259,14 +194,30 @@ func create_enemy_states(encounter: Dictionary) -> Array:
 	return enemy_states
 
 
-func execute_basic_attack(battle_state: Dictionary, attacker: Dictionary, target_id: StringName) -> bool:
+func execute_basic_attack(game_state, battle_state: Dictionary, attacker: Dictionary, target_id: StringName) -> bool:
 	var target := get_unit_by_id(battle_state["enemy_states"], target_id)
 	if target.is_empty() or is_unit_defeated(target):
 		return false
 
-	var damage := calculate_damage(int(attacker["attack"]), int(target["defense"]), bool(target.get("is_defending", false)))
+	var damage_result := calculate_battle_damage(game_state, attacker, target, int(attacker["attack"]), EMPTY_ID, false)
+	target = damage_result["target"]
+	var damage: int = int(damage_result["damage"])
 	apply_damage(target, damage)
 	set_unit_by_id(battle_state["enemy_states"], target)
+	append_presentation_event(battle_state, {
+		"action_type": &"attack",
+		"source_id": attacker["unit_id"],
+		"target_ids": [target["unit_id"]],
+		"damage_values": [damage],
+		"healing_values": [],
+		"defeated_ids": get_defeated_ids([target]),
+		"is_group_action": false,
+		"triggered_affix_ids": damage_result["triggered_affix_ids"],
+		"affix_messages": damage_result["affix_messages"],
+		"damage_before_affixes": [int(damage_result["damage_before_affixes"])],
+		"damage_after_affixes": [damage],
+	})
+	append_affix_logs(battle_state, damage_result["affix_messages"])
 	append_log(battle_state, "%s普通攻击%s，造成%d点伤害。" % [
 		String(attacker["display_name"]),
 		String(target["display_name"]),
@@ -275,19 +226,45 @@ func execute_basic_attack(battle_state: Dictionary, attacker: Dictionary, target
 	return true
 
 
-func execute_skill(battle_state: Dictionary, attacker: Dictionary, target_id: StringName) -> bool:
+func execute_skill(game_state, battle_state: Dictionary, attacker: Dictionary, target_id: StringName) -> bool:
 	if int(attacker["skill_cooldown"]) > 0:
 		return false
 
 	var skill_type := String(attacker["skill_type"])
+	var action_skill_id := StringName(attacker.get("skill_id", EMPTY_ID))
+	var base_cooldown_for_action := int(attacker.get("skill_cooldown_duration", 0))
+	var effective_cooldown_for_action := int(attacker.get("effective_skill_cooldown_duration", base_cooldown_for_action))
+	if game_state != null and game_state.equipment_system != null:
+		effective_cooldown_for_action = game_state.equipment_system.get_effective_skill_cooldown(attacker, action_skill_id, base_cooldown_for_action)
 	if skill_type == "single_damage":
 		var target := get_unit_by_id(battle_state["enemy_states"], target_id)
 		if target.is_empty() or is_unit_defeated(target):
 			return false
-		var skill_attack := int(floor(float(attacker["attack"]) * float(attacker["skill_multiplier"])))
-		var damage := calculate_damage(skill_attack, int(target["defense"]), bool(target.get("is_defending", false)))
+		var skill_multiplier := float(attacker["skill_multiplier"])
+		var skill_attack := int(floor(float(attacker["attack"]) * skill_multiplier))
+		var skill_id := StringName(attacker.get("skill_id", EMPTY_ID))
+		var damage_result := calculate_battle_damage(game_state, attacker, target, skill_attack, skill_id, true)
+		target = damage_result["target"]
+		var damage: int = int(damage_result["damage"])
 		apply_damage(target, damage)
 		set_unit_by_id(battle_state["enemy_states"], target)
+		append_presentation_event(battle_state, {
+			"action_type": &"skill",
+			"source_id": attacker["unit_id"],
+			"target_ids": [target["unit_id"]],
+			"damage_values": [damage],
+			"healing_values": [],
+			"defeated_ids": get_defeated_ids([target]),
+			"is_group_action": false,
+			"triggered_affix_ids": damage_result["triggered_affix_ids"],
+			"affix_messages": damage_result["affix_messages"],
+			"raw_damage_before_affixes": [int(damage_result["raw_damage_before_affixes"])],
+			"raw_damage_after_affixes": [int(damage_result["raw_damage_after_affixes"])],
+			"damage_before_affixes": [int(damage_result["damage_before_affixes"])],
+			"damage_after_affixes": [damage],
+			"skill_cooldown_applied": effective_cooldown_for_action,
+		})
+		append_affix_logs(battle_state, damage_result["affix_messages"])
 		append_log(battle_state, "%s使用%s，对%s造成%d点伤害。" % [
 			String(attacker["display_name"]),
 			String(attacker["skill_name"]),
@@ -297,15 +274,36 @@ func execute_skill(battle_state: Dictionary, attacker: Dictionary, target_id: St
 	elif skill_type == "aoe_damage":
 		var total_hits := 0
 		var skill_attack := int(floor(float(attacker["attack"]) * float(attacker["skill_multiplier"])))
+		var skill_id := StringName(attacker.get("skill_id", EMPTY_ID))
 		var enemies: Array = battle_state["enemy_states"]
+		var target_ids: Array = []
+		var damage_values: Array = []
+		var raw_damage_before_affixes: Array = []
+		var raw_damage_after_affixes: Array = []
+		var damage_before_affixes: Array = []
+		var damage_after_affixes: Array = []
+		var triggered_affix_ids: Array = []
+		var affix_messages: Array = []
+		var hit_targets: Array = []
 		for index in range(enemies.size()):
 			var enemy: Dictionary = enemies[index]
 			if is_unit_defeated(enemy):
 				continue
-			var damage := calculate_damage(skill_attack, int(enemy["defense"]), bool(enemy.get("is_defending", false)))
+			var damage_result := calculate_battle_damage(game_state, attacker, enemy, skill_attack, skill_id, true)
+			enemy = damage_result["target"]
+			var damage: int = int(damage_result["damage"])
 			apply_damage(enemy, damage)
 			enemies[index] = enemy
 			total_hits += 1
+			target_ids.append(enemy["unit_id"])
+			damage_values.append(damage)
+			raw_damage_before_affixes.append(int(damage_result["raw_damage_before_affixes"]))
+			raw_damage_after_affixes.append(int(damage_result["raw_damage_after_affixes"]))
+			damage_before_affixes.append(int(damage_result["damage_before_affixes"]))
+			damage_after_affixes.append(damage)
+			append_unique_all(triggered_affix_ids, damage_result["triggered_affix_ids"])
+			append_unique_all(affix_messages, damage_result["affix_messages"])
+			hit_targets.append(enemy)
 			append_log(battle_state, "%s使用%s，对%s造成%d点伤害。" % [
 				String(attacker["display_name"]),
 				String(attacker["skill_name"]),
@@ -315,12 +313,47 @@ func execute_skill(battle_state: Dictionary, attacker: Dictionary, target_id: St
 		if total_hits == 0:
 			return false
 		battle_state["enemy_states"] = enemies
+		append_presentation_event(battle_state, {
+			"action_type": &"group_attack",
+			"source_id": attacker["unit_id"],
+			"target_ids": target_ids,
+			"damage_values": damage_values,
+			"healing_values": [],
+			"defeated_ids": get_defeated_ids(hit_targets),
+			"is_group_action": true,
+			"triggered_affix_ids": triggered_affix_ids,
+			"affix_messages": affix_messages,
+			"raw_damage_before_affixes": raw_damage_before_affixes,
+			"raw_damage_after_affixes": raw_damage_after_affixes,
+			"damage_before_affixes": damage_before_affixes,
+			"damage_after_affixes": damage_after_affixes,
+			"skill_cooldown_applied": effective_cooldown_for_action,
+		})
+		append_affix_logs(battle_state, affix_messages)
 	elif skill_type == "heal":
 		var target := get_unit_by_id(battle_state["party_states"], target_id)
 		if target.is_empty() or is_unit_defeated(target) or int(target["current_hp"]) >= int(target["max_hp"]):
 			return false
-		var healed := apply_heal(target, int(attacker["skill_heal_amount"]))
+		var heal_amount := int(attacker["skill_heal_amount"])
+		var skill_id := StringName(attacker.get("skill_id", EMPTY_ID))
+		var heal_result: Dictionary = game_state.equipment_system.modify_healing(attacker, skill_id, heal_amount) if game_state != null and game_state.equipment_system != null else make_local_modification_result(heal_amount)
+		var healed := apply_heal(target, int(heal_result["final_value"]))
 		set_unit_by_id(battle_state["party_states"], target)
+		append_presentation_event(battle_state, {
+			"action_type": &"heal",
+			"source_id": attacker["unit_id"],
+			"target_ids": [target["unit_id"]],
+			"damage_values": [],
+			"healing_values": [healed],
+			"defeated_ids": [],
+			"is_group_action": false,
+			"triggered_affix_ids": heal_result["triggered_affix_ids"],
+			"affix_messages": heal_result["messages"],
+			"healing_before_affixes": [heal_amount],
+			"healing_after_affixes": [int(heal_result["final_value"])],
+			"skill_cooldown_applied": effective_cooldown_for_action,
+		})
+		append_affix_logs(battle_state, heal_result["messages"])
 		append_log(battle_state, "%s使用%s，为%s恢复%d点生命。" % [
 			String(attacker["display_name"]),
 			String(attacker["skill_name"]),
@@ -330,15 +363,36 @@ func execute_skill(battle_state: Dictionary, attacker: Dictionary, target_id: St
 	else:
 		return false
 
-	attacker["skill_cooldown"] = int(attacker["skill_cooldown_duration"])
+	if game_state != null and game_state.equipment_system != null:
+		append_affix_logs(battle_state, game_state.equipment_system.get_skill_cooldown_messages(attacker, action_skill_id, base_cooldown_for_action))
+	attacker["effective_skill_cooldown_duration"] = effective_cooldown_for_action
+	attacker["skill_cooldown"] = effective_cooldown_for_action
 	set_unit_by_id(battle_state["party_states"], attacker)
 	return true
 
 
-func execute_defend(battle_state: Dictionary, unit: Dictionary) -> bool:
+func execute_defend(game_state, battle_state: Dictionary, unit: Dictionary) -> bool:
 	unit["is_defending"] = true
+	var affix_result: Dictionary = game_state.equipment_system.process_after_defend(unit) if game_state != null and game_state.equipment_system != null else {"heal_amount": 0, "triggered_affix_ids": [], "messages": []}
+	var healed := 0
+	if int(affix_result.get("heal_amount", 0)) > 0 and not is_unit_defeated(unit):
+		healed = apply_heal(unit, int(affix_result["heal_amount"]))
 	set_unit_by_id(battle_state["party_states"], unit)
+	append_presentation_event(battle_state, {
+		"action_type": &"defend",
+		"source_id": unit["unit_id"],
+		"target_ids": [unit["unit_id"]],
+		"damage_values": [],
+		"healing_values": [healed] if int(affix_result.get("heal_amount", 0)) > 0 else [],
+		"defeated_ids": [],
+		"is_group_action": false,
+		"triggered_affix_ids": affix_result.get("triggered_affix_ids", []),
+		"affix_messages": affix_result.get("messages", []),
+		"healing_before_affixes": [0],
+		"healing_after_affixes": [int(affix_result.get("heal_amount", 0))],
+	})
 	append_log(battle_state, "%s进入防御状态。" % String(unit["display_name"]))
+	append_affix_logs(battle_state, affix_result.get("messages", []))
 	return true
 
 
@@ -356,6 +410,15 @@ func execute_medicine(game_state, battle_state: Dictionary, unit: Dictionary, ta
 
 	var healed := apply_heal(target, 12)
 	set_unit_by_id(battle_state["party_states"], target)
+	append_presentation_event(battle_state, {
+		"action_type": &"medicine",
+		"source_id": unit["unit_id"],
+		"target_ids": [target["unit_id"]],
+		"damage_values": [],
+		"healing_values": [healed],
+		"defeated_ids": [],
+		"is_group_action": false,
+	})
 	append_log(battle_state, "%s使用药品，为%s恢复%d点生命。" % [
 		String(unit["display_name"]),
 		String(target["display_name"]),
@@ -421,11 +484,20 @@ func start_next_round(game_state) -> void:
 
 func prepare_player_turn(game_state, unit: Dictionary) -> void:
 	var battle_state: Dictionary = game_state.battle_state
-	if int(unit["skill_cooldown"]) > 0:
-		unit["skill_cooldown"] = int(unit["skill_cooldown"]) - 1
 	unit["is_defending"] = false
 	set_unit_by_id(battle_state["party_states"], unit)
 	game_state.battle_state = battle_state
+
+
+func tick_player_skill_cooldown_after_action(battle_state: Dictionary, unit_id: StringName) -> void:
+	var unit := get_unit_by_id(battle_state["party_states"], unit_id)
+	if unit.is_empty():
+		return
+	var cooldown := int(unit.get("skill_cooldown", 0))
+	if cooldown <= 0:
+		return
+	unit["skill_cooldown"] = cooldown - 1
+	set_unit_by_id(battle_state["party_states"], unit)
 
 
 func execute_enemy_turn(game_state, enemy: Dictionary) -> void:
@@ -433,13 +505,29 @@ func execute_enemy_turn(game_state, enemy: Dictionary) -> void:
 	enemy["action_count"] = int(enemy.get("action_count", 0)) + 1
 	if String(enemy.get("ai_type", "normal")) == "boss" and int(enemy["action_count"]) % 3 == 0:
 		var party_states: Array = battle_state["party_states"]
+		var target_ids: Array = []
+		var damage_values: Array = []
+		var damage_before_affixes: Array = []
+		var damage_after_affixes: Array = []
+		var triggered_affix_ids: Array = []
+		var affix_messages: Array = []
+		var hit_targets: Array = []
 		for index in range(party_states.size()):
 			var shockwave_target: Dictionary = party_states[index]
 			if is_unit_defeated(shockwave_target):
 				continue
-			var shockwave_damage := calculate_damage(int(enemy["attack"]), int(shockwave_target["defense"]), bool(shockwave_target.get("is_defending", false)))
+			var damage_result := calculate_battle_damage(game_state, enemy, shockwave_target, int(enemy["attack"]), EMPTY_ID, false)
+			shockwave_target = damage_result["target"]
+			var shockwave_damage: int = int(damage_result["damage"])
 			apply_damage(shockwave_target, shockwave_damage)
 			party_states[index] = shockwave_target
+			target_ids.append(shockwave_target["unit_id"])
+			damage_values.append(shockwave_damage)
+			damage_before_affixes.append(int(damage_result["damage_before_affixes"]))
+			damage_after_affixes.append(shockwave_damage)
+			append_unique_all(triggered_affix_ids, damage_result["triggered_affix_ids"])
+			append_unique_all(affix_messages, damage_result["affix_messages"])
+			hit_targets.append(shockwave_target)
 			append_log(battle_state, "%s释放震荡波，对%s造成%d点伤害。" % [
 				String(enemy["display_name"]),
 				String(shockwave_target["display_name"]),
@@ -447,16 +535,46 @@ func execute_enemy_turn(game_state, enemy: Dictionary) -> void:
 			])
 		battle_state["party_states"] = party_states
 		set_unit_by_id(battle_state["enemy_states"], enemy)
+		append_presentation_event(battle_state, {
+			"action_type": &"group_attack",
+			"source_id": enemy["unit_id"],
+			"target_ids": target_ids,
+			"damage_values": damage_values,
+			"healing_values": [],
+			"defeated_ids": get_defeated_ids(hit_targets),
+			"is_group_action": true,
+			"triggered_affix_ids": triggered_affix_ids,
+			"affix_messages": affix_messages,
+			"damage_before_affixes": damage_before_affixes,
+			"damage_after_affixes": damage_after_affixes,
+		})
+		append_affix_logs(battle_state, affix_messages)
 		game_state.battle_state = battle_state
 		return
 
 	var target := get_first_alive_party_unit(battle_state)
 	if target.is_empty():
 		return
-	var damage := calculate_damage(int(enemy["attack"]), int(target["defense"]), bool(target.get("is_defending", false)))
+	var damage_result := calculate_battle_damage(game_state, enemy, target, int(enemy["attack"]), EMPTY_ID, false)
+	target = damage_result["target"]
+	var damage: int = int(damage_result["damage"])
 	apply_damage(target, damage)
 	set_unit_by_id(battle_state["party_states"], target)
 	set_unit_by_id(battle_state["enemy_states"], enemy)
+	append_presentation_event(battle_state, {
+		"action_type": &"attack",
+		"source_id": enemy["unit_id"],
+		"target_ids": [target["unit_id"]],
+		"damage_values": [damage],
+		"healing_values": [],
+		"defeated_ids": get_defeated_ids([target]),
+		"is_group_action": false,
+		"triggered_affix_ids": damage_result["triggered_affix_ids"],
+		"affix_messages": damage_result["affix_messages"],
+		"damage_before_affixes": [int(damage_result["damage_before_affixes"])],
+		"damage_after_affixes": [damage],
+	})
+	append_affix_logs(battle_state, damage_result["affix_messages"])
 	append_log(battle_state, "%s攻击%s，造成%d点伤害。" % [
 		String(enemy["display_name"]),
 		String(target["display_name"]),
@@ -480,7 +598,10 @@ func finish_battle(game_state, outcome: String) -> Dictionary:
 		var party_unit: Dictionary = battle_state["party_states"][index]
 		party_unit["is_defending"] = false
 		battle_state["party_states"][index] = party_unit
-	game_state.adventurers = battle_state["party_states"].duplicate(true)
+	if game_state.has_method("update_character_runtime_states_from_party"):
+		game_state.update_character_runtime_states_from_party(battle_state["party_states"])
+	else:
+		game_state.adventurers = battle_state["party_states"].duplicate(true)
 
 	var result := {
 		"outcome": outcome,
@@ -560,6 +681,68 @@ func should_entry_come_before(a: Dictionary, b: Dictionary) -> bool:
 	return int(a["source_index"]) < int(b["source_index"])
 
 
+func calculate_battle_damage(
+	game_state,
+	attacker: Dictionary,
+	target: Dictionary,
+	raw_power: int,
+	skill_id: StringName = EMPTY_ID,
+	is_skill: bool = false
+) -> Dictionary:
+	var raw_before: int = raw_power
+	var raw_result: Dictionary = make_local_modification_result(raw_power)
+	if is_skill and game_state != null and game_state.equipment_system != null:
+		raw_result = game_state.equipment_system.modify_skill_raw_damage(attacker, skill_id, raw_power)
+	var raw_after: int = int(raw_result["final_value"])
+	var damage: int = max(1, raw_after - int(target["defense"]))
+
+	var final_result: Dictionary = make_local_modification_result(damage)
+	if is_skill and game_state != null and game_state.equipment_system != null:
+		final_result = game_state.equipment_system.modify_skill_final_damage(attacker, target, skill_id, damage)
+	damage = max(1, int(final_result["final_value"]))
+
+	if bool(target.get("is_defending", false)):
+		damage = max(1, int(floor(float(damage) * 0.5)))
+
+	var damage_before_receive_affixes: int = damage
+	var receive_result: Dictionary = make_local_modification_result(damage)
+	if game_state != null and game_state.equipment_system != null:
+		receive_result = game_state.equipment_system.process_before_receive_damage(target, damage)
+	damage = max(1, int(receive_result["final_value"]))
+	if receive_result.has("used_once_affix_ids"):
+		target["used_once_affix_ids"] = receive_result["used_once_affix_ids"]
+
+	var triggered_affix_ids: Array = []
+	append_unique_all(triggered_affix_ids, raw_result.get("triggered_affix_ids", []))
+	append_unique_all(triggered_affix_ids, final_result.get("triggered_affix_ids", []))
+	append_unique_all(triggered_affix_ids, receive_result.get("triggered_affix_ids", []))
+
+	var affix_messages: Array = []
+	append_unique_all(affix_messages, raw_result.get("messages", []))
+	append_unique_all(affix_messages, final_result.get("messages", []))
+	append_unique_all(affix_messages, receive_result.get("messages", []))
+
+	return {
+		"damage": damage,
+		"target": target,
+		"raw_damage_before_affixes": raw_before,
+		"raw_damage_after_affixes": raw_after,
+		"damage_before_affixes": damage_before_receive_affixes,
+		"damage_after_affixes": damage,
+		"triggered_affix_ids": triggered_affix_ids,
+		"affix_messages": affix_messages,
+	}
+
+
+func make_local_modification_result(original_value: int) -> Dictionary:
+	return {
+		"original_value": original_value,
+		"final_value": original_value,
+		"triggered_affix_ids": [],
+		"messages": [],
+	}
+
+
 func calculate_damage(attack_value: int, defense_value: int, is_defending: bool) -> int:
 	var damage: int = max(1, attack_value - defense_value)
 	if is_defending:
@@ -622,3 +805,28 @@ func append_log(battle_state: Dictionary, message: String) -> void:
 	while battle_log.size() > 12:
 		battle_log.pop_front()
 	battle_state["battle_log"] = battle_log
+
+
+func append_affix_logs(battle_state: Dictionary, messages: Array) -> void:
+	for message in messages:
+		append_log(battle_state, String(message))
+
+
+func append_unique_all(target: Array, source: Array) -> void:
+	for item in source:
+		if not target.has(item):
+			target.append(item)
+
+
+func append_presentation_event(battle_state: Dictionary, event: Dictionary) -> void:
+	var events: Array = battle_state.get("presentation_events", [])
+	events.append(event.duplicate(true))
+	battle_state["presentation_events"] = events
+
+
+func get_defeated_ids(units: Array) -> Array:
+	var defeated_ids: Array = []
+	for unit: Dictionary in units:
+		if is_unit_defeated(unit):
+			defeated_ids.append(unit["unit_id"])
+	return defeated_ids

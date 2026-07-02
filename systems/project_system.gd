@@ -166,19 +166,10 @@ func _apply_project_completion(game_state: Node, project_id: StringName) -> Stri
 			game_state.buildings["clinic"] = clinic
 			return "医院升到2级，每天制作1药品。"
 		&"weapon_upgrade":
-			game_state.party_attack_bonus += 2
-			for adventurer: Dictionary in game_state.adventurers:
-				adventurer["attack"] = int(adventurer.get("attack", 0)) + 2
+			game_state.apply_party_attack_bonus(2)
 			return "固定冒险队攻击力+2。"
 		&"armor_upgrade":
-			game_state.party_max_hp_bonus += 6
-			for adventurer: Dictionary in game_state.adventurers:
-				adventurer["max_hp"] = int(adventurer.get("max_hp", 0)) + 6
-				if int(adventurer.get("current_hp", 0)) > 0:
-					adventurer["current_hp"] = min(
-						int(adventurer.get("max_hp", 0)),
-						int(adventurer.get("current_hp", 0)) + 6
-					)
+			game_state.apply_party_max_hp_bonus(6)
 			return "固定冒险队最大生命+6，存活成员当前生命+6。"
 		_:
 			return ""
