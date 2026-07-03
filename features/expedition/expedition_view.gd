@@ -543,6 +543,7 @@ func refresh_action_report(report: Dictionary) -> void:
 			int(report["gather_amount"]),
 		])
 	lines.append("农田生产粮食：+%d" % int(report["food_produced"]))
+	append_farm_report_lines(lines, report)
 	lines.append("村庄消耗粮食：-%d" % int(report["village_food_consumed"]))
 	if int(report["medicine_produced"]) > 0:
 		lines.append("医院完成药品：+%d" % int(report["medicine_produced"]))
@@ -564,6 +565,24 @@ func refresh_action_report(report: Dictionary) -> void:
 			if not String(project_report.get("effect_text", "")).is_empty():
 				lines.append(String(project_report["effect_text"]))
 	action_report_label.text = "\n".join(lines)
+
+
+func append_farm_report_lines(lines: PackedStringArray, report: Dictionary) -> void:
+	var harvests: Array = report.get("farm_harvests", [])
+	if harvests.is_empty():
+		return
+	var wheat_count := 0
+	var herb_count := 0
+	for harvest: Dictionary in harvests:
+		match StringName(harvest.get("crop_id", &"")):
+			&"wheat":
+				wheat_count += 1
+			&"herb":
+				herb_count += 1
+	if wheat_count > 0:
+		lines.append("后方农田：小麦成熟 x%d，粮食+%d" % [wheat_count, int(report.get("farm_food_produced", 0))])
+	if herb_count > 0:
+		lines.append("后方农田：药草成熟 x%d，草药+%d" % [herb_count, int(report.get("farm_herb_produced", 0))])
 
 
 func refresh_expedition_result(report: Dictionary) -> void:

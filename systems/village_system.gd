@@ -18,14 +18,21 @@ func advance_day(game_state, reason: String = "manual_test") -> Dictionary:
 func process_daily_village(game_state) -> Dictionary:
 	var resources: Dictionary = game_state.resources
 	var buildings: Dictionary = game_state.buildings
-	var farm: Dictionary = buildings[FARM_ID]
 	var clinic: Dictionary = buildings[CLINIC_ID]
 
 	var food_before: int = int(resources["food"])
 	var medicine_before: int = int(resources["medicine"])
 
-	var food_produced: int = int(farm["daily_food_production"])
-	resources["food"] = food_before + food_produced
+	var report := {
+		"food_before": food_before,
+		"food_produced": 0,
+		"farm_plot_updates": [],
+		"farm_harvests": [],
+		"farm_food_produced": 0,
+		"farm_herb_produced": 0,
+	}
+	game_state.farm_system.process_daily_growth(game_state, report)
+	resources = game_state.resources
 
 	var medicine_produced := 0
 	var medicine_progress: int = int(clinic["medicine_progress"]) + 1
@@ -46,10 +53,8 @@ func process_daily_village(game_state) -> Dictionary:
 	var food_after: int = int(resources["food"])
 	var medicine_after: int = int(resources["medicine"])
 
-	return {
-		"food_before": food_before,
+	report.merge({
 		"food_after": food_after,
-		"food_produced": food_produced,
 		"food_consumed": food_consumed,
 		"food_net": food_after - food_before,
 		"medicine_before": medicine_before,
@@ -58,4 +63,5 @@ func process_daily_village(game_state) -> Dictionary:
 		"medicine_net": medicine_after - medicine_before,
 		"medicine_progress": medicine_progress,
 		"medicine_progress_required": medicine_progress_required,
-	}
+	}, true)
+	return report

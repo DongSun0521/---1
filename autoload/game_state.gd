@@ -9,6 +9,10 @@ signal building_level_changed(building_id: StringName, new_level: int)
 signal building_selected(building_id: StringName)
 signal building_project_changed(building_id: StringName)
 signal building_visual_refresh_requested(building_id: StringName)
+signal farm_state_changed
+signal farm_plot_changed(plot_id: int)
+signal crop_assigned(plot_id: int, crop_id: StringName)
+signal crop_harvested(plot_id: int, crop_id: StringName, resource_id: StringName, amount: int)
 signal daily_report_generated(report: Dictionary)
 signal expedition_started
 signal expedition_state_changed
@@ -42,6 +46,7 @@ const ExpeditionSystemScript := preload("res://systems/expedition_system.gd")
 const BattleSystemScript := preload("res://systems/battle_system.gd")
 const ProjectSystemScript := preload("res://systems/project_system.gd")
 const BuildingSystemScript := preload("res://systems/building_system.gd")
+const FarmSystemScript := preload("res://systems/farm_system.gd")
 const CharacterDatabaseScript := preload("res://scripts/data/character_database.gd")
 const EquipmentSystemScript := preload("res://systems/equipment_system.gd")
 const ForgeSystemScript := preload("res://systems/forge_system.gd")
@@ -124,6 +129,7 @@ var expedition_system: RefCounted = ExpeditionSystemScript.new()
 var battle_system: RefCounted = BattleSystemScript.new()
 var project_system: RefCounted = ProjectSystemScript.new()
 var building_system: RefCounted = BuildingSystemScript.new()
+var farm_system: RefCounted = FarmSystemScript.new()
 var character_database: RefCounted = CharacterDatabaseScript.new()
 var equipment_system: RefCounted = EquipmentSystemScript.new()
 var forge_system: RefCounted = ForgeSystemScript.new()
@@ -145,6 +151,7 @@ var boss_defeated: bool = false
 var core_material: int = 0
 var mvp_has_completed: bool = false
 var statistics: Dictionary = {}
+var farm_plot_states: Array = []
 
 
 func _ready() -> void:
@@ -156,6 +163,7 @@ func start_new_game() -> void:
 	resources = INITIAL_RESOURCES.duplicate(true)
 	buildings = INITIAL_BUILDINGS.duplicate(true)
 	building_system.ensure_initial_runtime_state(self)
+	farm_plot_states = farm_system.create_initial_plot_states(int(buildings.get("farm", {}).get("level", 1)))
 	project_state = project_system.create_initial_state()
 	character_runtime_states = character_database.create_initial_runtime_states()
 	equipment_inventory = equipment_system.create_initial_inventory_state()
@@ -219,6 +227,7 @@ func advance_day(reason: String = "manual_test", emit_signals: bool = true) -> D
 	last_forge_report = forge_daily_report.duplicate(true)
 
 	if emit_signals:
+		emit_farm_harvest_signals(last_daily_report)
 		emit_after_day_advanced()
 
 	return last_daily_report.duplicate(true)
@@ -350,6 +359,9 @@ func get_all_building_data() -> Array:
 func set_building_level(building_id: StringName, level: int) -> bool:
 	if not building_system.set_building_level(self, building_id, level):
 		return false
+	if building_id == &"farm":
+		farm_system.apply_farm_level(self, level)
+		farm_state_changed.emit()
 	building_level_changed.emit(building_id, level)
 	building_state_changed.emit(building_id)
 	building_visual_refresh_requested.emit(building_id)
@@ -363,6 +375,42 @@ func select_building(building_id: StringName) -> void:
 
 func get_last_daily_report() -> Dictionary:
 	return last_daily_report.duplicate(true)
+
+
+func get_crop_ids() -> Array[StringName]:
+	return farm_system.get_crop_ids()
+
+
+func get_crop_data(crop_id: StringName):
+	var data = farm_system.get_crop_data(crop_id)
+	return data
+
+
+func get_all_crop_data() -> Array:
+	return farm_system.get_all_crop_data()
+
+
+func get_farm_plot_states() -> Array:
+	return farm_system.get_plot_state_dictionaries(self)
+
+
+func get_farm_summary() -> Dictionary:
+	return farm_system.get_summary(self)
+
+
+func get_farm_last_error() -> String:
+	return farm_system.get_last_error()
+
+
+func assign_farm_crop(plot_id: int, crop_id: StringName, force_replace: bool = false) -> bool:
+	if not farm_system.assign_crop(self, plot_id, crop_id, force_replace):
+		return false
+	farm_plot_changed.emit(plot_id)
+	crop_assigned.emit(plot_id, crop_id)
+	building_state_changed.emit(&"farm")
+	farm_state_changed.emit()
+	state_changed.emit()
+	return true
 
 
 func is_expedition_active() -> bool:
@@ -828,9 +876,13 @@ func get_adventurer_summary() -> String:
 
 
 func get_growth_summary() -> Dictionary:
+	var farm_summary := get_farm_summary()
 	return {
 		"farm_level": int(buildings.get("farm", {}).get("level", 1)),
-		"farm_daily_food": int(buildings.get("farm", {}).get("daily_food_production", 4)),
+		"farm_daily_food": 0,
+		"farm_active_plots": int(farm_summary.get("active_plot_count", 0)),
+		"farm_unlocked_plots": int(farm_summary.get("unlocked_plot_count", 0)),
+		"farm_next_harvest_days": int(farm_summary.get("next_harvest_days", 0)),
 		"clinic_level": int(buildings.get("clinic", {}).get("level", 1)),
 		"clinic_progress_required": int(buildings.get("clinic", {}).get("medicine_progress_required", 2)),
 		"party_attack_bonus": party_attack_bonus,
@@ -864,8 +916,19 @@ func emit_all_building_state_changed() -> void:
 		building_state_changed.emit(building_id)
 
 
+func emit_farm_harvest_signals(report: Dictionary) -> void:
+	for harvest: Dictionary in report.get("farm_harvests", []):
+		crop_harvested.emit(
+			int(harvest.get("plot_id", 0)),
+			StringName(harvest.get("crop_id", &"")),
+			StringName(harvest.get("output_resource_id", &"")),
+			int(harvest.get("output_amount", 0))
+		)
+
+
 func emit_after_day_advanced() -> void:
 	emit_resources_changed()
+	farm_state_changed.emit()
 	emit_all_building_state_changed()
 	emit_day_changed()
 	day_advanced.emit(current_day)

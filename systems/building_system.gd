@@ -91,6 +91,8 @@ func set_building_level(game_state: Node, building_id: StringName, level: int) -
 		return false
 	if level < 1 or level > int(data.max_level):
 		return false
+	if building_id == &"farm" and not game_state.farm_system.can_set_farm_level(game_state, level):
+		return false
 	var state_key := _get_state_key(building_id)
 	if not game_state.buildings.has(state_key):
 		ensure_initial_runtime_state(game_state)
@@ -108,6 +110,8 @@ func _get_state_key(building_id: StringName) -> String:
 
 func _get_work_state(game_state: Node, building_id: StringName, _raw_state: Dictionary) -> StringName:
 	match building_id:
+		&"farm":
+			return game_state.farm_system.get_work_state(game_state)
 		&"weapon_forge":
 			var forge_state: Dictionary = game_state.get_forge_state()
 			if bool(forge_state.get("is_active", false)):
@@ -115,7 +119,7 @@ func _get_work_state(game_state: Node, building_id: StringName, _raw_state: Dict
 			if bool(game_state.get_last_forge_report().get("forge_completed", false)):
 				return &"completed"
 			return &"idle"
-		&"farm", &"hospital":
+		&"hospital":
 			return &"idle"
 		&"food_workshop":
 			return &"unavailable"
@@ -126,10 +130,10 @@ func _get_work_state(game_state: Node, building_id: StringName, _raw_state: Dict
 
 func _get_status_text(game_state: Node, building_id: StringName, raw_state: Dictionary, work_state: StringName) -> String:
 	match building_id:
+		&"farm":
+			return game_state.farm_system.get_status_text(game_state)
 		&"weapon_forge":
 			return game_state.get_active_forge_summary()
-		&"farm":
-			return "正常生产"
 		&"hospital":
 			return "正常运行"
 		&"food_workshop":

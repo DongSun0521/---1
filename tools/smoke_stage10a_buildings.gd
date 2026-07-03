@@ -103,9 +103,11 @@ func assert_window_layouts(game_state) -> void:
 func assert_existing_state_adapters(game_state) -> void:
 	require(game_state.get_building_state(&"hospital").get("state_key", "") == "clinic", "hospital should adapt clinic state")
 	require(game_state.get_building_state(&"weapon_forge").get("state_key", "") == "workshop", "weapon forge should adapt workshop state")
-	var farm_before: int = game_state.get_resource_amount("food")
-	game_state.advance_day("stage10a_adapter_check")
-	require(game_state.get_resource_amount("food") >= farm_before, "farm production should still run")
+	var report: Dictionary = game_state.advance_day("stage10a_adapter_check")
+	require(report.get("farm_plot_updates", []).size() == 3, "farm plots should advance through the daily adapter")
+	require(int(report.get("farm_food_produced", -1)) == 0, "farm should no longer use fixed daily food production")
+	var plots: Array = game_state.get_farm_plot_states()
+	require(int(plots[0].get("progress_days", -1)) == 1, "farm plot progress should advance")
 	var clinic_state: Dictionary = game_state.buildings.get("clinic", {})
 	require(int(clinic_state.get("medicine_progress", -1)) >= 0, "clinic medicine progress should still run")
 

@@ -60,6 +60,15 @@ var equipment_tip_bottom_label: Label
 var equipment_tip_compare_label: RichTextLabel
 var equipment_buttons: Dictionary = {}
 var project_buttons: Dictionary = {}
+var building_level_test_section: VBoxContainer
+var building_level_buttons: Dictionary = {}
+var building_level_test_feedback_label: Label
+var farm_section: VBoxContainer
+var farm_summary_label: Label
+var farm_plot_list_box: VBoxContainer
+var farm_assign_confirm_dialog: ConfirmationDialog
+var pending_farm_plot_id: int = 0
+var pending_farm_crop_id: StringName = &""
 var forge_page: PanelContainer
 var forge_recipe_list_box: VBoxContainer
 var forge_recipe_buttons: Dictionary = {}
@@ -259,6 +268,8 @@ func build_detail_panel() -> void:
 	workshop_art_rect.texture = get_building_level_texture(&"weapon_forge")
 	content.add_child(workshop_art_rect)
 
+	build_level_test_section(content)
+
 	detail_body_label = create_label("", 20, Color(0.96, 0.95, 0.88), HORIZONTAL_ALIGNMENT_LEFT)
 	content.add_child(detail_body_label)
 
@@ -270,9 +281,61 @@ func build_detail_panel() -> void:
 	forge_entry_button.pressed.connect(show_forge_page)
 	content.add_child(forge_entry_button)
 
+	build_farm_section(content)
 	build_project_section(content)
 	build_prep_section(content)
 	build_daily_report_section(content)
+	build_farm_assign_confirm_dialog()
+
+
+func build_level_test_section(parent: Control) -> void:
+	building_level_test_section = VBoxContainer.new()
+	building_level_test_section.add_theme_constant_override("separation", 8)
+	parent.add_child(building_level_test_section)
+
+	var title := create_label("建筑等级测试", 20, Color(0.98, 0.86, 0.58), HORIZONTAL_ALIGNMENT_LEFT)
+	building_level_test_section.add_child(title)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	building_level_test_section.add_child(row)
+
+	for level in range(1, 5):
+		var button := Button.new()
+		button.text = "Lv.%d" % level
+		button.custom_minimum_size = Vector2(92, 40)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		apply_button_style(button, false)
+		button.pressed.connect(set_selected_building_level.bind(level))
+		row.add_child(button)
+		building_level_buttons[level] = button
+
+	building_level_test_feedback_label = create_label("", 16, Color(0.94, 0.74, 0.50), HORIZONTAL_ALIGNMENT_LEFT)
+	building_level_test_section.add_child(building_level_test_feedback_label)
+
+
+func build_farm_section(parent: Control) -> void:
+	farm_section = VBoxContainer.new()
+	farm_section.add_theme_constant_override("separation", 10)
+	parent.add_child(farm_section)
+
+	var title := create_label("农田种植", 24, Color(0.98, 0.86, 0.58), HORIZONTAL_ALIGNMENT_LEFT)
+	farm_section.add_child(title)
+
+	farm_summary_label = create_label("", 18, Color(0.92, 0.93, 0.86), HORIZONTAL_ALIGNMENT_LEFT)
+	farm_section.add_child(farm_summary_label)
+
+	farm_plot_list_box = VBoxContainer.new()
+	farm_plot_list_box.add_theme_constant_override("separation", 8)
+	farm_section.add_child(farm_plot_list_box)
+
+
+func build_farm_assign_confirm_dialog() -> void:
+	farm_assign_confirm_dialog = ConfirmationDialog.new()
+	farm_assign_confirm_dialog.title = "确认改种"
+	farm_assign_confirm_dialog.dialog_text = ""
+	farm_assign_confirm_dialog.confirmed.connect(confirm_pending_farm_crop_assignment)
+	add_child(farm_assign_confirm_dialog)
 
 
 func build_project_section(parent: Control) -> void:
@@ -837,8 +900,11 @@ func refresh_detail_panel() -> void:
 	workshop_art_rect.texture = get_building_level_texture(selected_panel_id)
 	workshop_art_rect.visible = selected_data != null and workshop_art_rect.texture != null
 	forge_entry_button.visible = selected_panel_id == &"weapon_forge"
+	farm_section.visible = selected_panel_id == &"farm"
 	project_section.visible = selected_panel_id == &"weapon_forge" or selected_panel_id == &"project"
 	prep_section.visible = selected_panel_id == &"prep"
+	refresh_building_level_test(selected_data)
+	refresh_farm_section()
 
 	if selected_data != null:
 		detail_title_label.text = "%s  Lv.%d" % [
@@ -860,6 +926,176 @@ func refresh_detail_panel() -> void:
 			detail_body_label.text = "选择场景中的建筑或入口查看详情。"
 
 
+func refresh_building_level_test(selected_data) -> void:
+	if building_level_test_section == null:
+		return
+	building_level_test_section.visible = selected_data != null
+	if selected_data == null:
+		return
+
+	building_level_test_feedback_label.text = ""
+	var current_level := int(game_state.get_building_state(selected_panel_id).get("level", 1))
+	var max_level := int(selected_data.max_level)
+	for raw_level in building_level_buttons.keys():
+		var level := int(raw_level)
+		var button: Button = building_level_buttons[raw_level]
+		button.visible = level <= max_level
+		button.disabled = level == current_level
+		button.text = "Lv.%d" % level
+
+
+func set_selected_building_level(level: int) -> void:
+	var selected_data = game_state.get_building_data(selected_panel_id)
+	if selected_data == null:
+		return
+	if game_state.set_building_level(selected_panel_id, level):
+		refresh_detail_panel()
+		refresh_building_views()
+	else:
+		building_level_test_feedback_label.text = game_state.get_farm_last_error() if selected_panel_id == &"farm" else "等级切换失败"
+
+
+func refresh_farm_section() -> void:
+	if farm_section == null:
+		return
+	farm_section.visible = selected_panel_id == &"farm"
+	if not farm_section.visible:
+		return
+
+	var summary: Dictionary = game_state.get_farm_summary()
+	var crop_counts: Dictionary = summary.get("crop_counts", {})
+	farm_summary_label.text = "可用地块：%d / %d\n当前种植：小麦%d块，药草%d块\n%s" % [
+		int(summary.get("unlocked_plot_count", 0)),
+		int(summary.get("max_plot_count", 0)),
+		int(crop_counts.get(&"wheat", 0)),
+		int(crop_counts.get(&"herb", 0)),
+		format_next_harvest_text(int(summary.get("next_harvest_days", 0))),
+	]
+
+	for child: Node in farm_plot_list_box.get_children():
+		child.queue_free()
+	for plot_state: Dictionary in game_state.get_farm_plot_states():
+		farm_plot_list_box.add_child(create_farm_plot_card(plot_state))
+
+
+func create_farm_plot_card(plot_state: Dictionary) -> Control:
+	var panel := create_dark_panel("FarmPlot%dPanel" % int(plot_state.get("plot_id", 0)), 0.82)
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var margin := create_margin(10)
+	panel.add_child(margin)
+
+	var root := VBoxContainer.new()
+	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.add_theme_constant_override("separation", 6)
+	margin.add_child(root)
+
+	var plot_id := int(plot_state.get("plot_id", 0))
+	var is_unlocked := bool(plot_state.get("is_unlocked", false))
+	var title := create_label("地块%d" % plot_id, 19, Color(1.0, 0.90, 0.62), HORIZONTAL_ALIGNMENT_LEFT)
+	root.add_child(title)
+
+	if not is_unlocked:
+		root.add_child(create_label("%d级农田解锁" % int(plot_state.get("unlock_level", 1)), 17, Color(0.72, 0.72, 0.66), HORIZONTAL_ALIGNMENT_LEFT))
+		return panel
+
+	var crop_id := StringName(plot_state.get("crop_id", &""))
+	if crop_id == &"" or not bool(plot_state.get("is_active", false)):
+		root.add_child(create_label("空闲地块\n尚未选择作物", 17, Color(0.90, 0.90, 0.82), HORIZONTAL_ALIGNMENT_LEFT))
+	else:
+		var progress := int(plot_state.get("progress_days", 0))
+		var growth_days := int(plot_state.get("growth_days", 0))
+		var output_resource_id := StringName(plot_state.get("output_resource_id", &""))
+		root.add_child(create_label("%s\n进度：%d / %d天\n剩余：%d天\n成熟产出：%d%s" % [
+			String(plot_state.get("crop_display_name", "")),
+			progress,
+			growth_days,
+			int(plot_state.get("remaining_days", 0)),
+			int(plot_state.get("output_amount", 0)),
+			get_resource_display_name(output_resource_id),
+		], 17, Color(0.94, 0.94, 0.86), HORIZONTAL_ALIGNMENT_LEFT))
+
+	var progress_bar := ProgressBar.new()
+	progress_bar.custom_minimum_size = Vector2(0, 12)
+	progress_bar.min_value = 0
+	progress_bar.max_value = max(1, int(plot_state.get("growth_days", 1)))
+	progress_bar.value = int(plot_state.get("progress_days", 0))
+	progress_bar.visible = crop_id != &""
+	root.add_child(progress_bar)
+
+	var button_row := HBoxContainer.new()
+	button_row.add_theme_constant_override("separation", 8)
+	root.add_child(button_row)
+	for crop_data in game_state.get_all_crop_data():
+		var button := Button.new()
+		button.text = "种植%s" % String(crop_data.display_name)
+		button.custom_minimum_size = Vector2(120, 36)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.disabled = crop_id == crop_data.crop_id and bool(plot_state.get("is_active", false))
+		apply_button_style(button, false)
+		button.pressed.connect(request_farm_crop_assignment.bind(plot_id, crop_data.crop_id))
+		button_row.add_child(button)
+
+	return panel
+
+
+func request_farm_crop_assignment(plot_id: int, crop_id: StringName) -> void:
+	var plot_state := get_farm_plot_state_dictionary(plot_id)
+	if int(plot_state.get("progress_days", 0)) > 0 and StringName(plot_state.get("crop_id", &"")) != crop_id:
+		pending_farm_plot_id = plot_id
+		pending_farm_crop_id = crop_id
+		var crop_data = game_state.get_crop_data(crop_id)
+		farm_assign_confirm_dialog.dialog_text = "当前作物已经生长%d天。\n\n改种%s将失去当前进度，且不会获得任何产出。\n\n是否继续？" % [
+			int(plot_state.get("progress_days", 0)),
+			String(crop_data.display_name) if crop_data != null else String(crop_id),
+		]
+		farm_assign_confirm_dialog.popup_centered()
+		return
+	assign_farm_crop(plot_id, crop_id, false)
+
+
+func confirm_pending_farm_crop_assignment() -> void:
+	if pending_farm_plot_id <= 0 or pending_farm_crop_id == &"":
+		return
+	assign_farm_crop(pending_farm_plot_id, pending_farm_crop_id, true)
+	pending_farm_plot_id = 0
+	pending_farm_crop_id = &""
+
+
+func assign_farm_crop(plot_id: int, crop_id: StringName, force_replace: bool) -> void:
+	if game_state.assign_farm_crop(plot_id, crop_id, force_replace):
+		refresh_detail_panel()
+		refresh_building_views()
+
+
+func get_farm_plot_state_dictionary(plot_id: int) -> Dictionary:
+	for plot_state: Dictionary in game_state.get_farm_plot_states():
+		if int(plot_state.get("plot_id", 0)) == plot_id:
+			return plot_state
+	return {}
+
+
+func format_next_harvest_text(next_harvest_days: int) -> String:
+	if next_harvest_days <= 0:
+		return "当前没有种植"
+	return "下次收获：%d天后" % next_harvest_days
+
+
+func get_resource_display_name(resource_id: StringName) -> String:
+	match resource_id:
+		&"food":
+			return "粮食"
+		&"medicine":
+			return "药品"
+		&"ore":
+			return "矿石"
+		&"herb":
+			return "草药"
+		&"boss_core":
+			return "核心"
+	return String(resource_id)
+
+
 func format_building_operation_text(building_id: StringName) -> String:
 	var data = game_state.get_building_data(building_id)
 	var state: Dictionary = game_state.get_building_state(building_id)
@@ -869,6 +1105,16 @@ func format_building_operation_text(building_id: StringName) -> String:
 	lines.append("当前状态：%s" % String(state.get("status", "")))
 	lines.append("")
 	lines.append(String(data.description))
+	if building_id == &"farm":
+		var farm_summary: Dictionary = game_state.get_farm_summary()
+		lines.append("")
+		lines.append("当前功能：地块种植与自动收获")
+		lines.append("可用地块：%d / %d" % [
+			int(farm_summary.get("unlocked_plot_count", 0)),
+			int(farm_summary.get("max_plot_count", 0)),
+		])
+		lines.append(format_next_harvest_text(int(farm_summary.get("next_harvest_days", 0))))
+		return "\n".join(lines)
 	match building_id:
 		&"farm":
 			var farm_state: Dictionary = game_state.buildings.get("farm", {})
@@ -999,6 +1245,7 @@ func refresh_daily_report(report: Dictionary) -> void:
 	lines.append("第 %d 天结算" % int(report["settled_day"]))
 	lines.append("")
 	lines.append("农田生产粮食：+%d" % int(report["food_produced"]))
+	append_farm_report_lines(lines, report)
 	if int(report["medicine_produced"]) > 0:
 		lines.append("医院完成药品：+%d" % int(report["medicine_produced"]))
 	else:
@@ -1031,6 +1278,45 @@ func refresh_daily_report(report: Dictionary) -> void:
 	lines.append("粮食净变化：%s" % format_signed_amount(int(report["food_net"])))
 	lines.append("药品净变化：%s" % format_signed_amount(int(report["medicine_net"])))
 	daily_report_label.text = "\n".join(lines)
+
+
+func append_farm_report_lines(lines: PackedStringArray, report: Dictionary) -> void:
+	var harvests: Array = report.get("farm_harvests", [])
+	if harvests.is_empty():
+		var updates: Array = report.get("farm_plot_updates", [])
+		if updates.is_empty():
+			lines.append("农田：没有种植进度")
+			return
+		lines.append("农田生长")
+		for update: Dictionary in updates:
+			lines.append("地块%d：%s %d/%d" % [
+				int(update.get("plot_id", 0)),
+				get_crop_display_name(StringName(update.get("crop_id", &""))),
+				int(update.get("progress_after", 0)),
+				int(update.get("required_days", 0)),
+			])
+		return
+
+	var wheat_count := 0
+	var herb_count := 0
+	for harvest: Dictionary in harvests:
+		match StringName(harvest.get("crop_id", &"")):
+			&"wheat":
+				wheat_count += 1
+			&"herb":
+				herb_count += 1
+	lines.append("农田收获")
+	if wheat_count > 0:
+		lines.append("小麦成熟 x%d，粮食+%d" % [wheat_count, int(report.get("farm_food_produced", 0))])
+	if herb_count > 0:
+		lines.append("药草成熟 x%d，草药+%d" % [herb_count, int(report.get("farm_herb_produced", 0))])
+
+
+func get_crop_display_name(crop_id: StringName) -> String:
+	var crop_data = game_state.get_crop_data(crop_id)
+	if crop_data == null:
+		return String(crop_id)
+	return String(crop_data.display_name)
 
 
 func advance_day() -> void:

@@ -152,11 +152,8 @@ func get_active_project_summary(game_state: Node) -> String:
 func _apply_project_completion(game_state: Node, project_id: StringName) -> String:
 	match project_id:
 		&"farm_expansion":
-			var farm: Dictionary = game_state.buildings.get("farm", {})
-			farm["level"] = 2
-			farm["daily_food_production"] = 6
-			game_state.buildings["farm"] = farm
-			return "农田升到2级，每日粮食产量变为6。"
+			game_state.set_building_level(&"farm", 2)
+			return "农田升到2级，解锁第4块地。"
 		&"hospital_expansion":
 			var clinic: Dictionary = game_state.buildings.get("clinic", {})
 			clinic["level"] = 2
