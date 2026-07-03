@@ -5,6 +5,7 @@ const EMPTY_NODE_ID := &""
 const MAX_CARRY_FOOD := 10
 const MAX_CARRY_MEDICINE := 5
 const EXPEDITION_DAILY_FOOD_CONSUMPTION := 1
+const ITEM_EXPEDITION_RATION := &"expedition_ration"
 
 const NODE_ORDER := [
 	&"village_exit",
@@ -69,11 +70,15 @@ func create_initial_state() -> Dictionary:
 		"furthest_node_id": START_NODE_ID,
 		"expedition_day_count": 0,
 		"food_departed": 0,
+		"rations_departed": 0,
 		"medicine_departed": 0,
 		"food_consumed": 0,
+		"rations_consumed": 0,
 		"medicine_consumed": 0,
 		"carried_food": 0,
+		"carried_rations": 0,
 		"carried_medicine": 0,
+		"active_meal_id": &"",
 		"cargo_ore": 0,
 		"cargo_herb": 0,
 		"cargo_core": 0,
@@ -86,43 +91,53 @@ func create_initial_state() -> Dictionary:
 	}
 
 
-func get_start_error(game_state, carried_food: int, carried_medicine: int) -> String:
+func get_start_error(game_state, carried_food: int, carried_medicine: int, selected_meal_id: StringName = &"") -> String:
 	if bool(game_state.expedition_state["is_active"]):
 		return "已有远征正在进行。"
 	if carried_food < 1:
-		return "至少需要携带1份粮食。"
+		return "至少需要携带1份远征口粮。"
 	if carried_food > MAX_CARRY_FOOD:
-		return "最多携带%d份粮食。" % MAX_CARRY_FOOD
-	if carried_food > game_state.get_resource_amount("food"):
-		return "村庄粮食不足。"
+		return "最多携带%d份远征口粮。" % MAX_CARRY_FOOD
+	if carried_food > game_state.get_item_count(ITEM_EXPEDITION_RATION):
+		return "村庄远征口粮不足。"
 	if carried_medicine < 0:
 		return "药品携带数量不能为负。"
 	if carried_medicine > MAX_CARRY_MEDICINE:
 		return "最多携带%d份药品。" % MAX_CARRY_MEDICINE
 	if carried_medicine > game_state.get_resource_amount("medicine"):
 		return "村庄药品不足。"
+	if selected_meal_id != &"":
+		if game_state.get_food_meal_data(selected_meal_id).is_empty():
+			return "未知特殊料理。"
+		if game_state.get_item_count(selected_meal_id) < 1:
+			return "特殊料理库存不足。"
 	return ""
 
 
-func can_start_expedition(game_state, carried_food: int, carried_medicine: int) -> bool:
-	return get_start_error(game_state, carried_food, carried_medicine).is_empty()
+func can_start_expedition(game_state, carried_food: int, carried_medicine: int, selected_meal_id: StringName = &"") -> bool:
+	return get_start_error(game_state, carried_food, carried_medicine, selected_meal_id).is_empty()
 
 
-func start_expedition(game_state, carried_food: int, carried_medicine: int) -> bool:
-	if not can_start_expedition(game_state, carried_food, carried_medicine):
+func start_expedition(game_state, carried_food: int, carried_medicine: int, selected_meal_id: StringName = &"") -> bool:
+	if not can_start_expedition(game_state, carried_food, carried_medicine, selected_meal_id):
 		return false
 
 	var resources: Dictionary = game_state.resources
-	resources["food"] = int(resources["food"]) - carried_food
 	resources["medicine"] = int(resources["medicine"]) - carried_medicine
 	game_state.resources = resources
+	game_state.remove_item(ITEM_EXPEDITION_RATION, carried_food, false)
+	if selected_meal_id != &"":
+		game_state.remove_item(selected_meal_id, 1, false)
 
 	var state := create_initial_state()
 	state["is_active"] = true
 	state["food_departed"] = carried_food
+	state["rations_departed"] = carried_food
 	state["medicine_departed"] = carried_medicine
 	state["carried_food"] = carried_food
+	state["carried_rations"] = carried_food
 	state["carried_medicine"] = carried_medicine
+	state["active_meal_id"] = selected_meal_id
 	game_state.expedition_state = state
 	game_state.last_expedition_action_report = {}
 	game_state.last_expedition_report = {}
@@ -134,14 +149,17 @@ func process_daily_consumption(game_state, village_report: Dictionary) -> Dictio
 	if not bool(state["is_active"]):
 		return {
 			"expedition_food_consumed": 0,
+			"expedition_rations_consumed": 0,
 			"expedition_day_count": 0,
 		}
 
-	var food_consumed := 0
-	if int(state["carried_food"]) > 0:
-		food_consumed = EXPEDITION_DAILY_FOOD_CONSUMPTION
-		state["carried_food"] = max(0, int(state["carried_food"]) - food_consumed)
-		state["food_consumed"] = int(state["food_consumed"]) + food_consumed
+	var ration_consumed := 0
+	if int(state["carried_rations"]) > 0:
+		ration_consumed = EXPEDITION_DAILY_FOOD_CONSUMPTION
+		state["carried_rations"] = max(0, int(state["carried_rations"]) - ration_consumed)
+		state["carried_food"] = int(state["carried_rations"])
+		state["food_consumed"] = int(state["food_consumed"]) + ration_consumed
+		state["rations_consumed"] = int(state["rations_consumed"]) + ration_consumed
 
 	state["expedition_day_count"] = int(state["expedition_day_count"]) + 1
 	state["village_food_produced"] = int(state["village_food_produced"]) + int(village_report["food_produced"])
@@ -150,9 +168,11 @@ func process_daily_consumption(game_state, village_report: Dictionary) -> Dictio
 	game_state.expedition_state = state
 
 	return {
-		"expedition_food_consumed": food_consumed,
+		"expedition_food_consumed": ration_consumed,
+		"expedition_rations_consumed": ration_consumed,
 		"expedition_day_count": int(state["expedition_day_count"]),
 		"carried_food_after": int(state["carried_food"]),
+		"carried_rations_after": int(state["carried_rations"]),
 	}
 
 
@@ -225,7 +245,7 @@ func return_to_village(game_state) -> Dictionary:
 		return {}
 
 	state["is_active"] = false
-	var food_returned := int(state["carried_food"])
+	var rations_returned := int(state["carried_rations"])
 	var medicine_returned := int(state["carried_medicine"])
 	var ore_gained := int(state["cargo_ore"])
 	var herb_gained := int(state["cargo_herb"])
@@ -236,7 +256,11 @@ func return_to_village(game_state) -> Dictionary:
 		"furthest_node_name": get_node_display_name(state["furthest_node_id"]),
 		"food_departed": int(state["food_departed"]),
 		"food_consumed": int(state["food_consumed"]),
-		"food_returned": food_returned,
+		"food_returned": rations_returned,
+		"rations_departed": int(state["rations_departed"]),
+		"rations_consumed": int(state["rations_consumed"]),
+		"rations_returned": rations_returned,
+		"active_meal_id": StringName(state.get("active_meal_id", &"")),
 		"medicine_departed": int(state["medicine_departed"]),
 		"medicine_consumed": int(state["medicine_consumed"]),
 		"medicine_returned": medicine_returned,
@@ -249,12 +273,12 @@ func return_to_village(game_state) -> Dictionary:
 	}
 
 	var resources: Dictionary = game_state.resources
-	resources["food"] = int(resources["food"]) + food_returned
 	resources["medicine"] = int(resources["medicine"]) + medicine_returned
 	resources["ore"] = int(resources["ore"]) + ore_gained
 	resources["herb"] = int(resources["herb"]) + herb_gained
 	resources["boss_core"] = int(resources.get("boss_core", 0)) + core_gained
 	game_state.resources = resources
+	game_state.add_item(ITEM_EXPEDITION_RATION, rations_returned, false)
 	game_state.core_material = int(game_state.core_material) + core_gained
 	game_state.last_expedition_report = report
 	game_state.last_expedition_action_report = {}
@@ -293,6 +317,10 @@ func apply_battle_failure(game_state, _result: Dictionary) -> Dictionary:
 		"food_departed": int(state["food_departed"]),
 		"food_consumed": int(state["food_consumed"]),
 		"food_returned": 0,
+		"rations_departed": int(state["rations_departed"]),
+		"rations_consumed": int(state["rations_consumed"]),
+		"rations_returned": 0,
+		"active_meal_id": StringName(state.get("active_meal_id", &"")),
 		"medicine_departed": int(state["medicine_departed"]),
 		"medicine_consumed": int(state["medicine_consumed"]),
 		"medicine_returned": 0,
@@ -321,7 +349,7 @@ func can_move_to_next_node(game_state) -> bool:
 		return false
 	if game_state.is_battle_active():
 		return false
-	if int(state["carried_food"]) < 1:
+	if int(state["carried_rations"]) < 1:
 		return false
 	return get_next_node_id(state["current_node_id"]) != EMPTY_NODE_ID
 
@@ -332,7 +360,7 @@ func can_gather_current_node(game_state) -> bool:
 		return false
 	if game_state.is_battle_active():
 		return false
-	if int(state["carried_food"]) < 1:
+	if int(state["carried_rations"]) < 1:
 		return false
 	var current_node_id: StringName = state["current_node_id"]
 	var node: Dictionary = get_node_data(current_node_id)
@@ -403,12 +431,20 @@ func create_action_report(daily_report: Dictionary, state: Dictionary) -> Dictio
 		"medicine_progress": int(daily_report["medicine_progress"]),
 		"medicine_progress_required": int(daily_report["medicine_progress_required"]),
 		"expedition_food_consumed": int(daily_report["expedition_food_consumed"]),
+		"expedition_rations_consumed": int(daily_report.get("expedition_rations_consumed", daily_report["expedition_food_consumed"])),
 		"farm_plot_updates": daily_report.get("farm_plot_updates", []).duplicate(true),
 		"farm_harvests": daily_report.get("farm_harvests", []).duplicate(true),
 		"farm_food_produced": int(daily_report.get("farm_food_produced", 0)),
 		"farm_herb_produced": int(daily_report.get("farm_herb_produced", 0)),
+		"food_workshop_report": daily_report.get("food_workshop_report", {}).duplicate(true),
+		"food_workshop_progress_updates": daily_report.get("food_workshop_progress_updates", []).duplicate(true),
+		"food_workshop_completed_recipe_id": StringName(daily_report.get("food_workshop_completed_recipe_id", &"")),
+		"food_workshop_output_item_id": StringName(daily_report.get("food_workshop_output_item_id", &"")),
+		"food_workshop_output_amount": int(daily_report.get("food_workshop_output_amount", 0)),
 		"carried_food": int(state["carried_food"]),
+		"carried_rations": int(state["carried_rations"]),
 		"carried_medicine": int(state["carried_medicine"]),
+		"active_meal_id": StringName(state.get("active_meal_id", &"")),
 		"cargo_ore": int(state["cargo_ore"]),
 		"cargo_herb": int(state["cargo_herb"]),
 		"cargo_core": int(state.get("cargo_core", 0)),

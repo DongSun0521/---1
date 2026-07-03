@@ -40,6 +40,11 @@ signal forge_project_started(report: Dictionary)
 signal forge_progress_changed(report: Dictionary)
 signal forge_project_completed(report: Dictionary)
 signal forge_state_changed
+signal food_workshop_state_changed
+signal food_recipe_started(recipe_id: StringName)
+signal food_recipe_completed(recipe_id: StringName, output_item_id: StringName, amount: int)
+signal stackable_item_count_changed(item_id: StringName, new_count: int)
+signal expedition_meal_changed(meal_id: StringName)
 
 const VillageSystemScript := preload("res://systems/village_system.gd")
 const ExpeditionSystemScript := preload("res://systems/expedition_system.gd")
@@ -50,6 +55,7 @@ const FarmSystemScript := preload("res://systems/farm_system.gd")
 const CharacterDatabaseScript := preload("res://scripts/data/character_database.gd")
 const EquipmentSystemScript := preload("res://systems/equipment_system.gd")
 const ForgeSystemScript := preload("res://systems/forge_system.gd")
+const FoodWorkshopSystemScript := preload("res://systems/food_workshop_system.gd")
 
 const INITIAL_DAY := 1
 const INITIAL_RESOURCES := {
@@ -58,6 +64,16 @@ const INITIAL_RESOURCES := {
 	"ore": 0,
 	"herb": 0,
 	"boss_core": 0,
+}
+const INITIAL_STACKABLE_ITEMS := {
+	&"expedition_ration": 6,
+	&"hearty_stew": 0,
+	&"hunter_roast": 0,
+}
+const STACKABLE_ITEM_LABELS := {
+	&"expedition_ration": "远征口粮",
+	&"hearty_stew": "丰盛炖汤",
+	&"hunter_roast": "猎手烤肉",
 }
 const RESOURCE_LABELS := {
 	"food": "粮食",
@@ -133,6 +149,7 @@ var farm_system: RefCounted = FarmSystemScript.new()
 var character_database: RefCounted = CharacterDatabaseScript.new()
 var equipment_system: RefCounted = EquipmentSystemScript.new()
 var forge_system: RefCounted = ForgeSystemScript.new()
+var food_workshop_system: RefCounted = FoodWorkshopSystemScript.new()
 var expedition_state: Dictionary = {}
 var last_expedition_action_report: Dictionary = {}
 var last_expedition_report: Dictionary = {}
@@ -144,7 +161,10 @@ var project_state: Dictionary = {}
 var character_runtime_states: Dictionary = {}
 var equipment_inventory: Dictionary = {}
 var forge_state
+var food_production_state
+var stackable_item_inventory: Dictionary = {}
 var last_forge_report: Dictionary = {}
+var last_food_workshop_report: Dictionary = {}
 var party_attack_bonus: int = 0
 var party_max_hp_bonus: int = 0
 var boss_defeated: bool = false
@@ -168,7 +188,10 @@ func start_new_game() -> void:
 	character_runtime_states = character_database.create_initial_runtime_states()
 	equipment_inventory = equipment_system.create_initial_inventory_state()
 	forge_state = forge_system.create_initial_state()
+	food_production_state = food_workshop_system.create_initial_state()
+	stackable_item_inventory = INITIAL_STACKABLE_ITEMS.duplicate(true)
 	last_forge_report = {}
+	last_food_workshop_report = {}
 	party_attack_bonus = 0
 	party_max_hp_bonus = 0
 	boss_defeated = false
@@ -205,6 +228,9 @@ func start_new_game() -> void:
 	emit_all_character_final_stats_changed()
 	equipment_inventory_changed.emit()
 	forge_state_changed.emit()
+	food_workshop_state_changed.emit()
+	emit_all_stackable_item_count_changed()
+	expedition_meal_changed.emit(&"")
 	daily_report_generated.emit(last_daily_report.duplicate(true))
 	state_changed.emit()
 
@@ -212,6 +238,7 @@ func start_new_game() -> void:
 func advance_day(reason: String = "manual_test", emit_signals: bool = true) -> Dictionary:
 	var settled_day: int = current_day
 	last_daily_report = village_system.process_daily_village(self)
+	var food_workshop_daily_report: Dictionary = food_workshop_system.process_daily_production(self)
 	var expedition_daily_report: Dictionary = expedition_system.process_daily_consumption(self, last_daily_report)
 	var project_daily_report: Dictionary = project_system.process_daily_project(self)
 	var forge_daily_report: Dictionary = forge_system.process_daily_forge(self)
@@ -220,11 +247,19 @@ func advance_day(reason: String = "manual_test", emit_signals: bool = true) -> D
 	last_daily_report["settled_day"] = settled_day
 	last_daily_report["new_day"] = current_day
 	last_daily_report["expedition_food_consumed"] = int(expedition_daily_report["expedition_food_consumed"])
+	last_daily_report["expedition_rations_consumed"] = int(expedition_daily_report.get("expedition_rations_consumed", expedition_daily_report["expedition_food_consumed"]))
 	last_daily_report["expedition_day_count"] = int(expedition_daily_report["expedition_day_count"])
 	last_daily_report["carried_food_after"] = int(expedition_daily_report.get("carried_food_after", 0))
+	last_daily_report["carried_rations_after"] = int(expedition_daily_report.get("carried_rations_after", last_daily_report["carried_food_after"]))
+	last_daily_report["food_workshop_report"] = food_workshop_daily_report.duplicate(true)
+	last_daily_report["food_workshop_progress_updates"] = food_workshop_daily_report.get("food_workshop_progress_updates", []).duplicate(true)
+	last_daily_report["food_workshop_completed_recipe_id"] = StringName(food_workshop_daily_report.get("recipe_id", &"")) if bool(food_workshop_daily_report.get("food_workshop_completed", false)) else &""
+	last_daily_report["food_workshop_output_item_id"] = StringName(food_workshop_daily_report.get("output_item_id", &""))
+	last_daily_report["food_workshop_output_amount"] = int(food_workshop_daily_report.get("output_amount", 0))
 	last_daily_report["project_report"] = project_daily_report.duplicate(true)
 	last_daily_report["forge_report"] = forge_daily_report.duplicate(true)
 	last_forge_report = forge_daily_report.duplicate(true)
+	last_food_workshop_report = food_workshop_daily_report.duplicate(true)
 
 	if emit_signals:
 		emit_farm_harvest_signals(last_daily_report)
@@ -247,6 +282,49 @@ func add_resource(resource_id: String, amount: int) -> void:
 	resources[resource_id] = max(0, int(resources[resource_id]) + amount)
 	emit_resources_changed()
 	state_changed.emit()
+
+
+func get_resource_display_name(resource_id: String) -> String:
+	return String(RESOURCE_LABELS.get(resource_id, resource_id))
+
+
+func get_item_display_name(item_id: StringName) -> String:
+	return String(STACKABLE_ITEM_LABELS.get(item_id, String(item_id)))
+
+
+func get_item_count(item_id: StringName) -> int:
+	return max(0, int(stackable_item_inventory.get(item_id, 0)))
+
+
+func add_item(item_id: StringName, amount: int, emit_signals: bool = true) -> void:
+	if amount <= 0:
+		return
+	stackable_item_inventory[item_id] = get_item_count(item_id) + amount
+	if emit_signals:
+		stackable_item_count_changed.emit(item_id, get_item_count(item_id))
+		emit_resources_changed()
+		state_changed.emit()
+
+
+func can_remove_item(item_id: StringName, amount: int) -> bool:
+	if amount < 0:
+		return false
+	return get_item_count(item_id) >= amount
+
+
+func remove_item(item_id: StringName, amount: int, emit_signals: bool = true) -> bool:
+	if amount < 0 or not can_remove_item(item_id, amount):
+		return false
+	stackable_item_inventory[item_id] = max(0, get_item_count(item_id) - amount)
+	if emit_signals:
+		stackable_item_count_changed.emit(item_id, get_item_count(item_id))
+		emit_resources_changed()
+		state_changed.emit()
+	return true
+
+
+func get_stackable_item_inventory() -> Dictionary:
+	return stackable_item_inventory.duplicate(true)
 
 
 func get_project_ids() -> Array[StringName]:
@@ -335,6 +413,61 @@ func start_forge_recipe(recipe_id: StringName) -> bool:
 	return true
 
 
+func get_food_recipe_ids() -> Array[StringName]:
+	return food_workshop_system.get_all_recipe_ids()
+
+
+func get_food_recipe_data(recipe_id: StringName) -> Dictionary:
+	return food_workshop_system.get_recipe_data(self, recipe_id).duplicate(true)
+
+
+func get_all_food_recipe_data() -> Array:
+	return food_workshop_system.get_all_recipe_data(self)
+
+
+func get_food_meal_data(meal_id: StringName) -> Dictionary:
+	return food_workshop_system.get_meal_data(meal_id).duplicate(true)
+
+
+func get_all_food_meal_data() -> Array:
+	return food_workshop_system.get_all_meal_data()
+
+
+func get_food_production_state() -> Dictionary:
+	return food_production_state.to_dictionary() if food_production_state != null else {}
+
+
+func get_active_food_workshop_summary() -> String:
+	return food_workshop_system.get_active_summary(self)
+
+
+func get_last_food_workshop_report() -> Dictionary:
+	return last_food_workshop_report.duplicate(true)
+
+
+func can_start_food_recipe(recipe_id: StringName) -> bool:
+	return food_workshop_system.can_start_recipe(self, recipe_id)
+
+
+func get_food_recipe_start_error(recipe_id: StringName) -> String:
+	return food_workshop_system.get_start_error(self, recipe_id)
+
+
+func start_food_recipe(recipe_id: StringName) -> bool:
+	var report: Dictionary = food_workshop_system.start_recipe(self, recipe_id)
+	if not bool(report.get("success", false)):
+		return false
+
+	last_food_workshop_report = report.duplicate(true)
+	emit_resources_changed()
+	food_recipe_started.emit(recipe_id)
+	food_workshop_state_changed.emit()
+	building_project_changed.emit(&"food_workshop")
+	building_state_changed.emit(&"food_workshop")
+	state_changed.emit()
+	return true
+
+
 func get_building_state(building_id: StringName) -> Dictionary:
 	if building_system != null and building_system.get_building_data(building_id) != null:
 		return building_system.get_runtime_state(self, building_id)
@@ -419,20 +552,23 @@ func is_expedition_active() -> bool:
 	return bool(expedition_state["is_active"])
 
 
-func can_start_expedition(carried_food: int, carried_medicine: int) -> bool:
-	return expedition_system.can_start_expedition(self, carried_food, carried_medicine)
+func can_start_expedition(carried_food: int, carried_medicine: int, selected_meal_id: StringName = &"") -> bool:
+	return expedition_system.can_start_expedition(self, carried_food, carried_medicine, selected_meal_id)
 
 
-func get_expedition_start_error(carried_food: int, carried_medicine: int) -> String:
-	return expedition_system.get_start_error(self, carried_food, carried_medicine)
+func get_expedition_start_error(carried_food: int, carried_medicine: int, selected_meal_id: StringName = &"") -> String:
+	return expedition_system.get_start_error(self, carried_food, carried_medicine, selected_meal_id)
 
 
-func start_expedition(carried_food: int, carried_medicine: int) -> bool:
-	if not expedition_system.start_expedition(self, carried_food, carried_medicine):
+func start_expedition(carried_food: int, carried_medicine: int, selected_meal_id: StringName = &"") -> bool:
+	if not expedition_system.start_expedition(self, carried_food, carried_medicine, selected_meal_id):
 		return false
 
 	statistics["total_expeditions_started"] = int(statistics.get("total_expeditions_started", 0)) + 1
 	emit_resources_changed()
+	if selected_meal_id != &"":
+		apply_expedition_meal_bonus(selected_meal_id)
+	expedition_meal_changed.emit(get_active_expedition_meal())
 	supplies_changed.emit()
 	expedition_state_changed.emit()
 	current_node_changed.emit(expedition_state["current_node_id"])
@@ -471,6 +607,7 @@ func return_from_expedition() -> bool:
 		return false
 
 	var should_complete_mvp: bool = int(report.get("core_gained", 0)) > 0 and not mvp_has_completed
+	clear_expedition_meal_bonus()
 	restore_character_runtime_states_full()
 	rebuild_adventurers_from_character_data(false)
 	emit_resources_changed()
@@ -594,6 +731,7 @@ func process_battle_result(result: Dictionary) -> void:
 	else:
 		var report: Dictionary = expedition_system.apply_battle_failure(self, result)
 		statistics["total_failed_expeditions"] = int(statistics.get("total_failed_expeditions", 0)) + 1
+		clear_expedition_meal_bonus()
 		restore_character_runtime_states_full()
 		rebuild_adventurers_from_character_data(false)
 		emit_resources_changed()
@@ -666,8 +804,8 @@ func get_profession_display_name(profession_id: StringName) -> String:
 func get_final_combat_stat_details(character_id: StringName) -> Dictionary:
 	return character_database.get_final_combat_stat_details(
 		character_id,
-		party_attack_bonus,
-		party_max_hp_bonus,
+		party_attack_bonus + get_expedition_meal_attack_bonus(),
+		party_max_hp_bonus + get_expedition_meal_max_hp_bonus(),
 		get_character_equipment_bonuses(character_id)
 	)
 
@@ -675,8 +813,8 @@ func get_final_combat_stat_details(character_id: StringName) -> Dictionary:
 func get_final_combat_stats(character_id: StringName) -> Dictionary:
 	return character_database.get_final_combat_stats(
 		character_id,
-		party_attack_bonus,
-		party_max_hp_bonus,
+		party_attack_bonus + get_expedition_meal_attack_bonus(),
+		party_max_hp_bonus + get_expedition_meal_max_hp_bonus(),
 		get_character_equipment_bonuses(character_id)
 	)
 
@@ -843,6 +981,56 @@ func apply_party_max_hp_bonus(amount: int) -> void:
 	emit_all_character_final_stats_changed()
 
 
+func get_active_expedition_meal() -> StringName:
+	return StringName(expedition_state.get("active_meal_id", &""))
+
+
+func get_active_expedition_meal_data() -> Dictionary:
+	return get_food_meal_data(get_active_expedition_meal())
+
+
+func get_expedition_meal_attack_bonus() -> int:
+	var meal: Dictionary = get_active_expedition_meal_data()
+	return int(meal.get("attack_bonus", 0))
+
+
+func get_expedition_meal_max_hp_bonus() -> int:
+	var meal: Dictionary = get_active_expedition_meal_data()
+	return int(meal.get("max_hp_bonus", 0))
+
+
+func apply_expedition_meal_bonus(meal_id: StringName) -> void:
+	var meal: Dictionary = get_food_meal_data(meal_id)
+	if meal.is_empty():
+		return
+	var max_hp_bonus := int(meal.get("max_hp_bonus", 0))
+	if max_hp_bonus > 0:
+		for character_id: StringName in character_database.get_party_order():
+			var runtime_state = character_runtime_states.get(character_id, null)
+			if runtime_state == null:
+				continue
+			if int(runtime_state.current_hp) > 0:
+				runtime_state.current_hp += max_hp_bonus
+				character_runtime_states[character_id] = runtime_state
+				character_runtime_state_changed.emit(character_id)
+	rebuild_adventurers_from_character_data(false)
+	emit_all_character_final_stats_changed()
+
+
+func clear_expedition_meal_bonus() -> void:
+	var previous_meal_id := get_active_expedition_meal()
+	if previous_meal_id == &"":
+		return
+	var state: Dictionary = expedition_state
+	state["active_meal_id"] = &""
+	expedition_state = state
+	for character_id: StringName in character_database.get_party_order():
+		clamp_character_runtime_hp_to_final_max(character_id)
+	rebuild_adventurers_from_character_data(false)
+	emit_all_character_final_stats_changed()
+	expedition_meal_changed.emit(&"")
+
+
 func get_current_node_encounter_id() -> StringName:
 	return expedition_system.get_node_encounter_id(expedition_state["current_node_id"])
 
@@ -852,15 +1040,15 @@ func is_current_battle_node_cleared() -> bool:
 
 
 func get_resource_summary() -> String:
-	return "第 %d 天 | 粮食 %d | 药品 %d | 矿石 %d | 草药 %d | 核心 %d" % [
+	return "第 %d 天 | 粮食 %d | 远征口粮 %d | 药品 %d | 矿石 %d | 草药 %d | 核心 %d" % [
 		current_day,
 		get_resource_amount("food"),
+		get_item_count(&"expedition_ration"),
 		get_resource_amount("medicine"),
 		get_resource_amount("ore"),
 		get_resource_amount("herb"),
 		get_resource_amount("boss_core"),
 	]
-
 
 func get_adventurer_summary() -> String:
 	var lines := PackedStringArray()
@@ -950,6 +1138,21 @@ func emit_after_day_advanced() -> void:
 	if bool(forge_report.get("forge_completed", false)):
 		forge_project_completed.emit(forge_report.duplicate(true))
 		equipment_inventory_changed.emit()
+	var food_workshop_report: Dictionary = last_daily_report.get("food_workshop_report", {})
+	if bool(food_workshop_report.get("had_active_food_workshop", false)):
+		food_workshop_state_changed.emit()
+		building_project_changed.emit(&"food_workshop")
+		building_state_changed.emit(&"food_workshop")
+	if bool(food_workshop_report.get("food_workshop_completed", false)):
+		food_recipe_completed.emit(
+			StringName(food_workshop_report.get("recipe_id", &"")),
+			StringName(food_workshop_report.get("output_item_id", &"")),
+			int(food_workshop_report.get("output_amount", 0))
+		)
+		stackable_item_count_changed.emit(
+			StringName(food_workshop_report.get("output_item_id", &"")),
+			get_item_count(StringName(food_workshop_report.get("output_item_id", &"")))
+		)
 	if is_expedition_active():
 		supplies_changed.emit()
 		expedition_state_changed.emit()
@@ -970,3 +1173,9 @@ func emit_all_character_runtime_state_changed() -> void:
 func emit_all_character_final_stats_changed() -> void:
 	for character_id: StringName in character_database.get_party_order():
 		character_final_stats_changed.emit(character_id)
+
+
+func emit_all_stackable_item_count_changed() -> void:
+	for raw_item_id in stackable_item_inventory.keys():
+		var item_id := StringName(raw_item_id)
+		stackable_item_count_changed.emit(item_id, get_item_count(item_id))

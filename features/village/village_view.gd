@@ -66,6 +66,13 @@ var building_level_test_feedback_label: Label
 var farm_section: VBoxContainer
 var farm_summary_label: Label
 var farm_plot_list_box: VBoxContainer
+var food_workshop_section: VBoxContainer
+var food_workshop_inventory_label: Label
+var food_workshop_project_label: Label
+var food_recipe_list_box: VBoxContainer
+var food_workshop_feedback_label: Label
+var selected_meal_id: StringName = &""
+var meal_option_buttons: Dictionary = {}
 var farm_assign_confirm_dialog: ConfirmationDialog
 var pending_farm_plot_id: int = 0
 var pending_farm_crop_id: StringName = &""
@@ -100,6 +107,10 @@ func _ready() -> void:
 	game_state.forge_project_started.connect(on_forge_report)
 	game_state.forge_progress_changed.connect(on_forge_report)
 	game_state.forge_project_completed.connect(on_forge_report)
+	game_state.food_workshop_state_changed.connect(on_food_workshop_data_changed)
+	game_state.food_recipe_started.connect(on_food_recipe_report)
+	game_state.food_recipe_completed.connect(on_food_recipe_completed)
+	game_state.stackable_item_count_changed.connect(on_stackable_item_changed)
 	game_state.building_state_changed.connect(on_building_state_changed)
 	advance_day_button.pressed.connect(advance_day)
 	food_spin_box.value_changed.connect(on_supply_value_changed)
@@ -129,6 +140,14 @@ func _exit_tree() -> void:
 		game_state.forge_progress_changed.disconnect(on_forge_report)
 	if game_state != null and game_state.forge_project_completed.is_connected(on_forge_report):
 		game_state.forge_project_completed.disconnect(on_forge_report)
+	if game_state != null and game_state.food_workshop_state_changed.is_connected(on_food_workshop_data_changed):
+		game_state.food_workshop_state_changed.disconnect(on_food_workshop_data_changed)
+	if game_state != null and game_state.food_recipe_started.is_connected(on_food_recipe_report):
+		game_state.food_recipe_started.disconnect(on_food_recipe_report)
+	if game_state != null and game_state.food_recipe_completed.is_connected(on_food_recipe_completed):
+		game_state.food_recipe_completed.disconnect(on_food_recipe_completed)
+	if game_state != null and game_state.stackable_item_count_changed.is_connected(on_stackable_item_changed):
+		game_state.stackable_item_count_changed.disconnect(on_stackable_item_changed)
 	if game_state != null and game_state.building_state_changed.is_connected(on_building_state_changed):
 		game_state.building_state_changed.disconnect(on_building_state_changed)
 
@@ -282,6 +301,7 @@ func build_detail_panel() -> void:
 	content.add_child(forge_entry_button)
 
 	build_farm_section(content)
+	build_food_workshop_section(content)
 	build_project_section(content)
 	build_prep_section(content)
 	build_daily_report_section(content)
@@ -338,6 +358,28 @@ func build_farm_assign_confirm_dialog() -> void:
 	add_child(farm_assign_confirm_dialog)
 
 
+func build_food_workshop_section(parent: Control) -> void:
+	food_workshop_section = VBoxContainer.new()
+	food_workshop_section.add_theme_constant_override("separation", 10)
+	parent.add_child(food_workshop_section)
+
+	var title := create_label("食物制造", 24, Color(0.98, 0.86, 0.58), HORIZONTAL_ALIGNMENT_LEFT)
+	food_workshop_section.add_child(title)
+
+	food_workshop_inventory_label = create_label("", 18, Color(0.92, 0.93, 0.86), HORIZONTAL_ALIGNMENT_LEFT)
+	food_workshop_section.add_child(food_workshop_inventory_label)
+
+	food_workshop_project_label = create_label("", 18, Color(0.92, 0.93, 0.86), HORIZONTAL_ALIGNMENT_LEFT)
+	food_workshop_section.add_child(food_workshop_project_label)
+
+	food_recipe_list_box = VBoxContainer.new()
+	food_recipe_list_box.add_theme_constant_override("separation", 8)
+	food_workshop_section.add_child(food_recipe_list_box)
+
+	food_workshop_feedback_label = create_label("", 17, Color(0.94, 0.84, 0.58), HORIZONTAL_ALIGNMENT_LEFT)
+	food_workshop_section.add_child(food_workshop_feedback_label)
+
+
 func build_project_section(parent: Control) -> void:
 	project_section = VBoxContainer.new()
 	project_section.add_theme_constant_override("separation", 10)
@@ -384,6 +426,21 @@ func build_prep_section(parent: Control) -> void:
 
 	medicine_spin_box = create_supply_spin_box(0, 5, 1)
 	prep_section.add_child(create_spin_row("携带药品", medicine_spin_box))
+
+	var meal_title := create_label("特殊料理", 20, Color(0.98, 0.86, 0.58), HORIZONTAL_ALIGNMENT_LEFT)
+	prep_section.add_child(meal_title)
+	var meal_options := VBoxContainer.new()
+	meal_options.add_theme_constant_override("separation", 6)
+	prep_section.add_child(meal_options)
+	for meal_id: StringName in [&"", &"hearty_stew", &"hunter_roast"]:
+		var button := Button.new()
+		button.toggle_mode = true
+		button.custom_minimum_size = Vector2(0, 38)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		apply_button_style(button, false)
+		button.pressed.connect(select_expedition_meal.bind(meal_id))
+		meal_options.add_child(button)
+		meal_option_buttons[meal_id] = button
 
 	expected_days_label = create_label("", 20, Color(0.93, 0.94, 0.86), HORIZONTAL_ALIGNMENT_LEFT)
 	prep_section.add_child(expected_days_label)
@@ -901,10 +958,12 @@ func refresh_detail_panel() -> void:
 	workshop_art_rect.visible = selected_data != null and workshop_art_rect.texture != null
 	forge_entry_button.visible = selected_panel_id == &"weapon_forge"
 	farm_section.visible = selected_panel_id == &"farm"
+	food_workshop_section.visible = selected_panel_id == &"food_workshop"
 	project_section.visible = selected_panel_id == &"weapon_forge" or selected_panel_id == &"project"
 	prep_section.visible = selected_panel_id == &"prep"
 	refresh_building_level_test(selected_data)
 	refresh_farm_section()
+	refresh_food_workshop_section()
 
 	if selected_data != null:
 		detail_title_label.text = "%s  Lv.%d" % [
@@ -1156,6 +1215,96 @@ func format_building_operation_text(building_id: StringName) -> String:
 	return "\n".join(lines)
 
 
+func refresh_food_workshop_section() -> void:
+	if food_workshop_section == null:
+		return
+	food_workshop_section.visible = selected_panel_id == &"food_workshop"
+	if not food_workshop_section.visible:
+		return
+
+	food_workshop_inventory_label.text = "当前库存：\n粮食：%d\n远征口粮：%d\n丰盛炖汤：%d\n猎手烤肉：%d" % [
+		game_state.get_resource_amount("food"),
+		game_state.get_item_count(&"expedition_ration"),
+		game_state.get_item_count(&"hearty_stew"),
+		game_state.get_item_count(&"hunter_roast"),
+	]
+	var production_state: Dictionary = game_state.get_food_production_state()
+	if bool(production_state.get("is_active", false)):
+		var recipe: Dictionary = game_state.get_food_recipe_data(StringName(production_state.get("recipe_id", &"")))
+		var remaining: int = max(0, int(production_state.get("required_days", 0)) - int(production_state.get("progress_days", 0)))
+		food_workshop_project_label.text = "当前项目：%s\n进度：%d / %d天\n剩余：%d天" % [
+			String(recipe.get("display_name", "食物制造")),
+			int(production_state.get("progress_days", 0)),
+			int(production_state.get("required_days", 0)),
+			remaining,
+		]
+	else:
+		food_workshop_project_label.text = "当前项目：空闲"
+
+	for child: Node in food_recipe_list_box.get_children():
+		child.queue_free()
+	for recipe: Dictionary in game_state.get_all_food_recipe_data():
+		food_recipe_list_box.add_child(create_food_recipe_card(recipe))
+
+
+func create_food_recipe_card(recipe: Dictionary) -> Control:
+	var panel := create_dark_panel("FoodRecipeCard", 0.82)
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var margin := create_margin(10)
+	panel.add_child(margin)
+	var root := VBoxContainer.new()
+	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.add_theme_constant_override("separation", 6)
+	margin.add_child(root)
+
+	root.add_child(create_label(String(recipe.get("display_name", "")), 20, Color(1.0, 0.90, 0.62), HORIZONTAL_ALIGNMENT_LEFT))
+	root.add_child(create_label(String(recipe.get("description", "")), 16, Color(0.90, 0.90, 0.82), HORIZONTAL_ALIGNMENT_LEFT))
+	var ingredient_costs: Dictionary = recipe.get("ingredient_costs", {})
+	var cost_parts := PackedStringArray()
+	for raw_resource_id in ingredient_costs.keys():
+		var resource_id := String(raw_resource_id)
+		cost_parts.append("%s×%d" % [
+			game_state.get_resource_display_name(resource_id),
+			int(ingredient_costs[raw_resource_id]),
+		])
+	var effect_text := String(recipe.get("effect_text", ""))
+	var output_line := "产出：%s×%d" % [
+		game_state.get_item_display_name(StringName(recipe.get("output_item_id", &""))),
+		int(recipe.get("output_amount", 0)),
+	]
+	if not effect_text.is_empty():
+		output_line += "\n远征效果：%s" % effect_text
+	root.add_child(create_label("消耗：%s\n工期：%d天\n%s" % [
+		" ".join(cost_parts),
+		int(recipe.get("duration_days", 0)),
+		output_line,
+	], 17, Color(0.94, 0.94, 0.86), HORIZONTAL_ALIGNMENT_LEFT))
+
+	var recipe_id := StringName(recipe.get("recipe_id", &""))
+	var error_text := String(recipe.get("start_error", ""))
+	var button := Button.new()
+	button.text = "开始制作" if error_text.is_empty() else error_text
+	button.custom_minimum_size = Vector2(0, 38)
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.disabled = not error_text.is_empty()
+	button.tooltip_text = error_text
+	apply_button_style(button, true)
+	button.pressed.connect(start_food_recipe.bind(recipe_id))
+	root.add_child(button)
+	return panel
+
+
+func start_food_recipe(recipe_id: StringName) -> void:
+	if game_state.start_food_recipe(recipe_id):
+		var recipe: Dictionary = game_state.get_food_recipe_data(recipe_id)
+		food_workshop_feedback_label.text = "已开始制作：%s" % String(recipe.get("display_name", ""))
+	else:
+		food_workshop_feedback_label.text = game_state.get_food_recipe_start_error(recipe_id)
+	refresh_food_workshop_section()
+	refresh_detail_panel()
+	refresh_building_views()
+
+
 func refresh_projects() -> void:
 	var growth: Dictionary = game_state.get_growth_summary()
 	growth_label.text = "农田 Lv.%d（每日粮食 %d） | 医院 Lv.%d（%d 天/药品）\n队伍攻击 +%d | 队伍生命 +%d" % [
@@ -1201,17 +1350,17 @@ func refresh_projects() -> void:
 
 func refresh_expedition_prep() -> void:
 	var is_active: bool = game_state.is_expedition_active()
-	var food_stock: int = game_state.get_resource_amount("food")
+	var ration_stock: int = game_state.get_item_count(&"expedition_ration")
 	var medicine_stock: int = game_state.get_resource_amount("medicine")
 
-	if food_stock < 1:
+	if ration_stock < 1:
 		food_spin_box.min_value = 0
 		food_spin_box.max_value = 0
 		food_spin_box.value = 0
 		food_spin_box.editable = false
 	else:
 		food_spin_box.min_value = 1
-		food_spin_box.max_value = min(10, food_stock)
+		food_spin_box.max_value = min(10, ration_stock)
 		food_spin_box.value = clampi(int(food_spin_box.value), 1, int(food_spin_box.max_value))
 		food_spin_box.editable = not is_active
 
@@ -1220,10 +1369,11 @@ func refresh_expedition_prep() -> void:
 	medicine_spin_box.value = clampi(int(medicine_spin_box.value), 0, int(medicine_spin_box.max_value))
 	medicine_spin_box.editable = not is_active
 
+	refresh_meal_options(is_active)
 	var carried_food := int(food_spin_box.value)
 	var carried_medicine := int(medicine_spin_box.value)
-	expected_days_label.text = "预计最多行动：%d 天" % carried_food
-	var start_error: String = game_state.get_expedition_start_error(carried_food, carried_medicine)
+	expected_days_label.text = "远征口粮库存：%d\n预计支持：%d次日行动" % [ration_stock, carried_food]
+	var start_error: String = game_state.get_expedition_start_error(carried_food, carried_medicine, selected_meal_id)
 	start_expedition_button.disabled = not start_error.is_empty()
 	start_expedition_button.tooltip_text = start_error
 	advance_day_button.disabled = is_active
@@ -1231,10 +1381,10 @@ func refresh_expedition_prep() -> void:
 	if is_active:
 		prep_status_label.text = "远征正在进行，请前往冒险页面。"
 	elif start_error.is_empty():
-		prep_status_label.text = "补给已就绪：粮食 %d，药品 %d。" % [carried_food, carried_medicine]
+		var meal_text: String = "无" if selected_meal_id == &"" else game_state.get_item_display_name(selected_meal_id)
+		prep_status_label.text = "补给已就绪：远征口粮 %d，药品 %d，料理：%s。" % [carried_food, carried_medicine, meal_text]
 	else:
 		prep_status_label.text = start_error
-
 
 func refresh_daily_report(report: Dictionary) -> void:
 	if report.is_empty():
@@ -1255,7 +1405,7 @@ func refresh_daily_report(report: Dictionary) -> void:
 		])
 	lines.append("村庄消耗粮食：-%d" % int(report["food_consumed"]))
 	if int(report.get("expedition_food_consumed", 0)) > 0:
-		lines.append("远征粮食消耗：-%d" % int(report["expedition_food_consumed"]))
+		lines.append("远征口粮消耗：-%d" % int(report["expedition_food_consumed"]))
 	var project_report: Dictionary = report.get("project_report", {})
 	if bool(project_report.get("had_active_project", false)):
 		lines.append("工坊项目：%s %d/%d" % [
@@ -1337,8 +1487,38 @@ func on_supply_value_changed(_value: float) -> void:
 	refresh_expedition_prep()
 
 
+func refresh_meal_options(is_active: bool) -> void:
+	if not meal_option_buttons.has(&""):
+		return
+	if selected_meal_id != &"" and game_state.get_item_count(selected_meal_id) <= 0:
+		selected_meal_id = &""
+	for raw_meal_id in meal_option_buttons.keys():
+		var meal_id := StringName(raw_meal_id)
+		var button: Button = meal_option_buttons[raw_meal_id]
+		var count := 0
+		var effect_text := ""
+		if meal_id == &"":
+			button.text = "不携带料理"
+		else:
+			count = game_state.get_item_count(meal_id)
+			effect_text = game_state.food_workshop_system.get_output_effect_text(meal_id)
+			button.text = "%s ×%d  %s" % [
+				game_state.get_item_display_name(meal_id),
+				count,
+				effect_text,
+			]
+		button.button_pressed = meal_id == selected_meal_id
+		button.disabled = is_active or (meal_id != &"" and count <= 0)
+		button.tooltip_text = "库存不足" if meal_id != &"" and count <= 0 else effect_text
+
+
+func select_expedition_meal(meal_id: StringName) -> void:
+	selected_meal_id = meal_id
+	refresh_expedition_prep()
+
+
 func start_expedition() -> void:
-	game_state.start_expedition(int(food_spin_box.value), int(medicine_spin_box.value))
+	game_state.start_expedition(int(food_spin_box.value), int(medicine_spin_box.value), selected_meal_id)
 
 
 func select_character(character_id: StringName) -> void:
@@ -1360,6 +1540,32 @@ func on_equipment_data_changed() -> void:
 func on_forge_data_changed() -> void:
 	if forge_page != null and forge_page.visible:
 		refresh_forge_page()
+
+
+func on_food_workshop_data_changed() -> void:
+	refresh_food_workshop_section()
+	refresh_expedition_prep()
+
+
+func on_food_recipe_report(_recipe_id: StringName) -> void:
+	refresh_food_workshop_section()
+	refresh_building_views()
+
+
+func on_food_recipe_completed(_recipe_id: StringName, output_item_id: StringName, amount: int) -> void:
+	if food_workshop_feedback_label != null:
+		food_workshop_feedback_label.text = "制作完成：%s ×%d，已自动存入仓库。" % [
+			game_state.get_item_display_name(output_item_id),
+			amount,
+		]
+	refresh_food_workshop_section()
+	refresh_expedition_prep()
+	refresh_building_views()
+
+
+func on_stackable_item_changed(_item_id: StringName, _new_count: int) -> void:
+	refresh_food_workshop_section()
+	refresh_expedition_prep()
 
 
 func on_building_state_changed(building_id: StringName) -> void:

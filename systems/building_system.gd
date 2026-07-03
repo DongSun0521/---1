@@ -122,7 +122,10 @@ func _get_work_state(game_state: Node, building_id: StringName, _raw_state: Dict
 		&"hospital":
 			return &"idle"
 		&"food_workshop":
-			return &"unavailable"
+			var food_state: Dictionary = game_state.get_food_production_state()
+			if bool(food_state.get("is_active", false)):
+				return &"working"
+			return &"idle"
 		&"research_lab", &"residence", &"resource_collection":
 			return &"unavailable"
 	return &"idle"
@@ -145,6 +148,19 @@ func _get_status_text(game_state: Node, building_id: StringName, raw_state: Dict
 
 
 func _get_project_state(game_state: Node, building_id: StringName) -> Dictionary:
+	if building_id == &"food_workshop":
+		var food_state: Dictionary = game_state.get_food_production_state()
+		if not bool(food_state.get("is_active", false)):
+			return {}
+		var recipe_id: StringName = StringName(food_state.get("recipe_id", &""))
+		var recipe: Dictionary = game_state.get_food_recipe_data(recipe_id)
+		return {
+			"project_id": recipe_id,
+			"display_name": String(recipe.get("display_name", "食物制造")),
+			"progress_days": int(food_state.get("progress_days", 0)),
+			"required_days": int(food_state.get("required_days", 0)),
+			"completed": false,
+		}
 	if building_id != &"weapon_forge":
 		return {}
 	var forge_state: Dictionary = game_state.get_forge_state()

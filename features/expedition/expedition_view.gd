@@ -323,19 +323,27 @@ func refresh_status_panel() -> void:
 		if StringName(expedition_state["current_node_id"]) == &"ruins_entrance" and bool(game_state.boss_defeated):
 			node_description_label.text += "\n遗迹守卫已被击败。"
 
-	supplies_label.text = "远征粮食：%d\n远征药品：%d\n临时矿石：%d\n临时草药：%d\n临时核心：%d" % [
-		int(expedition_state["carried_food"]),
+	var active_meal_id := StringName(expedition_state.get("active_meal_id", &""))
+	var meal_text := "本次料理：无"
+	if active_meal_id != &"":
+		var meal_data: Dictionary = game_state.get_food_meal_data(active_meal_id)
+		meal_text = "本次料理：%s\n效果：%s" % [
+			String(meal_data.get("display_name", game_state.get_item_display_name(active_meal_id))),
+			game_state.food_workshop_system.get_output_effect_text(active_meal_id),
+		]
+	supplies_label.text = "远征口粮：%d\n远征药品：%d\n临时矿石：%d\n临时草药：%d\n临时核心：%d\n%s" % [
+		int(expedition_state.get("carried_rations", expedition_state["carried_food"])),
 		int(expedition_state["carried_medicine"]),
 		int(expedition_state["cargo_ore"]),
 		int(expedition_state["cargo_herb"]),
 		int(expedition_state.get("cargo_core", 0)),
+		meal_text,
 	]
 	party_label.text = format_party_status()
 	project_label.text = format_project_status()
 	village_stock_label.text = format_village_stock()
 	if not input_locked:
 		refresh_action_report(game_state.get_last_expedition_action_report())
-
 
 func refresh_map() -> void:
 	var node_positions := get_node_positions()
@@ -536,7 +544,7 @@ func refresh_action_report(report: Dictionary) -> void:
 	var lines := PackedStringArray()
 	lines.append("第%d天结算" % int(report["new_day"]))
 	lines.append(String(report["action_text"]))
-	lines.append("远征粮食：-%d" % int(report["expedition_food_consumed"]))
+	lines.append("远征口粮：-%d" % int(report["expedition_food_consumed"]))
 	if report.has("gather_resource") and int(report.get("gather_amount", 0)) > 0:
 		lines.append("%s：+%d" % [
 			get_resource_display_name(String(report["gather_resource"])),
@@ -593,8 +601,8 @@ func refresh_expedition_result(report: Dictionary) -> void:
 	lines.append("远征完成")
 	lines.append("远征持续：%d天" % int(report["duration_days"]))
 	lines.append("最远到达：%s" % String(report["furthest_node_name"]))
-	lines.append("远征消耗粮食：%d" % int(report["food_consumed"]))
-	lines.append("剩余粮食带回：%d" % int(report["food_returned"]))
+	lines.append("远征消耗口粮：%d" % int(report["food_consumed"]))
+	lines.append("剩余口粮带回：%d" % int(report["food_returned"]))
 	lines.append("剩余药品带回：%d" % int(report["medicine_returned"]))
 	lines.append("获得矿石：%d" % int(report["ore_gained"]))
 	lines.append("获得草药：%d" % int(report["herb_gained"]))
@@ -690,8 +698,8 @@ func get_node_tooltip(node_id: StringName, state: String) -> String:
 		return "冒险队当前所在节点。"
 	if not game_state.is_expedition_active():
 		return "请先在村庄页面准备远征。"
-	if int(game_state.get_expedition_state().get("carried_food", 0)) <= 0:
-		return "远征粮食不足，不能继续前进。"
+	if int(game_state.get_expedition_state().get("carried_rations", game_state.get_expedition_state().get("carried_food", 0))) <= 0:
+		return "远征口粮不足，不能继续前进。"
 	return "只能沿路线前往高亮的下一个节点。"
 
 
@@ -703,8 +711,8 @@ func get_move_disabled_reason() -> String:
 	if game_state.is_battle_active():
 		return "战斗进行中不能移动。"
 	var expedition_state: Dictionary = game_state.get_expedition_state()
-	if int(expedition_state["carried_food"]) < 1:
-		return "远征粮食不足，不能继续前进。"
+	if int(expedition_state.get("carried_rations", expedition_state["carried_food"])) < 1:
+		return "远征口粮不足，不能继续前进。"
 	if game_state.get_next_expedition_node_name().is_empty():
 		return "前方区域暂未开放。"
 	if not game_state.can_move_to_next_expedition_node():
@@ -720,8 +728,8 @@ func get_gather_disabled_reason() -> String:
 	if game_state.is_battle_active():
 		return "战斗进行中不能采集。"
 	var expedition_state: Dictionary = game_state.get_expedition_state()
-	if int(expedition_state["carried_food"]) < 1:
-		return "远征粮食不足，不能采集。"
+	if int(expedition_state.get("carried_rations", expedition_state["carried_food"])) < 1:
+		return "远征口粮不足，不能采集。"
 	if game_state.get_expedition_gather_label().is_empty():
 		return "当前节点没有可采集资源。"
 	if game_state.has_collected_current_expedition_node():
