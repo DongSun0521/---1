@@ -58,8 +58,13 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	presentation_in_progress = false
+	input_locked = false
 	if effect_player != null:
 		effect_player.clear_all_effects()
+	for view in unit_views.values():
+		if is_instance_valid(view) and view.has_method("clear_presentation_visuals"):
+			view.clear_presentation_visuals()
 	if game_state != null and game_state.battle_state_changed.is_connected(refresh):
 		game_state.battle_state_changed.disconnect(refresh)
 
@@ -230,6 +235,7 @@ func update_unit_view(unit: Dictionary, side_index: int) -> void:
 		view.unit_selected.connect(select_unit_target)
 		var visual: Dictionary = visual_registry.get_visual(unit)
 		view.setup(unit, visual_registry.get_frames(unit), visual)
+		view.set_global_float_layer(floating_text_layer)
 
 	var base_position: Vector2 = visual_registry.get_base_position(unit, side_index)
 	var actual_position: Vector2 = visual_registry.scale_position(base_position, battlefield.size)
@@ -387,10 +393,7 @@ func play_presentation_event(event: Dictionary) -> void:
 	var action_type: StringName = event.get("action_type", &"")
 
 	if action_type == &"defend":
-		if source_view != null:
-			source_view.show_float_text("盾", Color(0.62, 0.86, 1.0))
-		play_target_feedback(event)
-		await get_tree().create_timer(0.36).timeout
+		await present_defend_visual(event, effect_registry.get_action_visual(&"defend"), source_view)
 		return
 
 	if action_type == &"medicine":
@@ -402,10 +405,9 @@ func play_presentation_event(event: Dictionary) -> void:
 	if profile == null:
 		await present_legacy_visual(event, source_view, source_id)
 		return
-	if source_view != null:
-		source_view.sprite.play(&"attack")
+	if source_view != null and not profile.skip_source_animation:
 		var release_frame: int = profile.release_frame if profile.release_frame >= 0 else int(round(get_impact_time(source_id) * 10.0))
-		await get_tree().create_timer(maxf(0.0, float(release_frame) / 10.0)).timeout
+		await source_view.play_animation_until_frame(profile.source_animation_name, release_frame, profile.source_animation_speed_scale)
 	await present_profile_visual(event, profile, source_view)
 	if not is_inside_tree():
 		return
@@ -428,7 +430,19 @@ func present_profile_visual(event: Dictionary, profile: BattleActionVisualProfil
 		await wait_for_effect_handles(warning_handles)
 
 	if profile.projectile_id != &"" and not target_views.is_empty():
-		await projectile_player.launch_projectile(profile.projectile_id, source_view, target_views[0])
+		var projectile_id := profile.projectile_override_id if profile.projectile_override_id != &"" else profile.projectile_id
+		var impact_effect_id := profile.impact_effect_override_id
+		var projectile_data = effect_registry.get_projectile(projectile_id)
+		var resolved_impact_effect_id: StringName = impact_effect_id if impact_effect_id != &"" else StringName(projectile_data.impact_effect_id) if projectile_data != null else &""
+		await projectile_player.launch_projectile(projectile_id, source_view, target_views[0], {
+			"source_anchor": profile.source_anchor,
+			"target_anchor": profile.target_anchor,
+			"projectile_scale": profile.projectile_scale_override,
+			"impact_scale": profile.impact_scale_override,
+			"travel_duration": profile.projectile_duration_override,
+			"effect_speed_scale": profile.effect_speed_scale,
+			"impact_effect_id": resolved_impact_effect_id,
+		})
 		play_target_feedback(event)
 		var projectile_feedback_started := Time.get_ticks_msec()
 		var projectile_handles: Array = []
@@ -438,11 +452,20 @@ func present_profile_visual(event: Dictionary, profile: BattleActionVisualProfil
 		return
 
 	var impact_handles: Array = []
-	if profile.impact_effect_id != &"":
-		for target_view in target_views:
-			impact_handles.append(effect_player.play_effect(profile.impact_effect_id, make_effect_context(source_view, target_view)))
-	if profile.impact_delay > 0.0:
-		await get_tree().create_timer(profile.impact_delay).timeout
+	var impact_effect_id := profile.impact_effect_override_id if profile.impact_effect_override_id != &"" else profile.impact_effect_id
+	if impact_effect_id != &"":
+		var effect_targets := target_views if profile.spawn_per_target else target_views.slice(0, 1)
+		for index in range(effect_targets.size()):
+			var context := make_effect_context(source_view, effect_targets[index], profile)
+			context.scale_multiplier = profile.impact_scale_override * profile.effect_scale_override
+			context.speed_scale = profile.effect_speed_scale
+			impact_handles.append(effect_player.play_effect(impact_effect_id, context))
+			if profile.target_stagger_offset > 0.0 and index < effect_targets.size() - 1:
+				await get_tree().create_timer(profile.target_stagger_offset).timeout
+	var impact_delay := get_profile_impact_delay(profile, impact_effect_id)
+	if impact_delay > 0.0:
+		await get_tree().create_timer(impact_delay).timeout
+	play_profile_recoil(profile, source_view, target_views)
 	play_target_feedback(event)
 	var feedback_started := Time.get_ticks_msec()
 	await wait_for_target_feedback(event, impact_handles, feedback_started)
@@ -464,8 +487,12 @@ func play_target_feedback(event: Dictionary) -> void:
 	var healing_values: Array = event.get("healing_values", [])
 	var defeated_ids: Array = event.get("defeated_ids", [])
 
+	var presented_targets := {}
 	for index in range(target_ids.size()):
 		var target_id: StringName = target_ids[index]
+		if presented_targets.has(target_id):
+			continue
+		presented_targets[target_id] = true
 		var target_view = unit_views.get(target_id, null)
 		if target_view == null:
 			continue
@@ -507,11 +534,50 @@ func get_event_target_views(event: Dictionary) -> Array:
 	return views
 
 
-func make_effect_context(source_view, target_view) -> BattleEffectContext:
+func make_effect_context(source_view, target_view, profile: BattleActionVisualProfile = null) -> BattleEffectContext:
 	var context := BattleEffectContextScript.new()
 	context.source_view = source_view
 	context.target_view = target_view
+	if profile != null:
+		context.anchor_override = profile.target_anchor
 	return context
+
+
+func get_profile_impact_delay(profile: BattleActionVisualProfile, effect_id: StringName) -> float:
+	if profile.impact_delay > 0.0:
+		return profile.impact_delay
+	if profile.impact_timing != BattleActionVisualProfile.ImpactTiming.EFFECT_FRAME or profile.effect_impact_frame < 0 or effect_id == &"":
+		return 0.0
+	var data = effect_registry.get_effect(effect_id)
+	if data == null or data.sprite_frames == null or not data.sprite_frames.has_animation(data.animation_name):
+		return 0.0
+	var animation_speed: float = float(data.sprite_frames.get_animation_speed(data.animation_name)) * maxf(0.01, profile.effect_speed_scale)
+	return float(profile.effect_impact_frame) / maxf(0.01, animation_speed)
+
+
+func play_profile_recoil(profile: BattleActionVisualProfile, source_view, target_views: Array) -> void:
+	if profile.target_recoil_distance <= 0.0:
+		return
+	for target_view in target_views:
+		if target_view == null or not target_view.has_method("play_visual_recoil"):
+			continue
+		var direction := Vector2.RIGHT
+		if source_view != null:
+			direction = (target_view.global_position - source_view.global_position).normalized()
+		if direction.is_zero_approx():
+			direction = Vector2.RIGHT
+		target_view.play_visual_recoil(direction * profile.target_recoil_distance)
+
+
+func present_defend_visual(event: Dictionary, _profile: BattleActionVisualProfile, source_view) -> void:
+	if source_view != null:
+		var source_state := get_unit_by_id(StringName(event.get("source_id", &"")))
+		if not source_state.is_empty():
+			source_view.update_state(source_state, false)
+		source_view.play_defend_visual()
+	await get_tree().create_timer(0.12).timeout
+	play_target_feedback(event)
+	await get_tree().create_timer(0.24).timeout
 
 
 func wait_for_effect_handles(handles: Array) -> void:
@@ -585,6 +651,8 @@ func refresh_target_highlights() -> void:
 func clear_unit_views() -> void:
 	for raw_id in unit_views.keys():
 		var view = unit_views[raw_id]
+		if view.has_method("clear_presentation_visuals"):
+			view.clear_presentation_visuals()
 		view.queue_free()
 	unit_views.clear()
 

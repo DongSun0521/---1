@@ -2,11 +2,11 @@
 extends SceneTree
 
 const SPECS := [
-	{"source": "res://assets/art/effect/projectiles/magic_bolt_sheet.png", "output": "res://assets/art/effect/sprite_frames/magic_bolt_frames.tres", "frame_width": 192, "frame_height": 1024, "count": 8, "fps": 12.0, "loop": true},
-	{"source": "res://assets/art/effect/impact/hit_spark_sheet.png", "output": "res://assets/art/effect/sprite_frames/hit_spark_frames.tres", "frame_width": 310, "frame_height": 724, "count": 7, "fps": 12.0, "loop": false},
-	{"source": "res://assets/art/effect/impact/arcane_burst_sheet.png", "output": "res://assets/art/effect/sprite_frames/arcane_burst_frames.tres", "frame_width": 192, "frame_height": 1024, "count": 8, "fps": 12.0, "loop": false},
-	{"source": "res://assets/art/effect/heal/heal_circle_sheet.png", "output": "res://assets/art/effect/sprite_frames/heal_circle_frames.tres", "frame_width": 192, "frame_height": 1024, "count": 8, "fps": 10.0, "loop": false},
-	{"source": "res://assets/art/effect/boss/earth_spike_sheet.png", "output": "res://assets/art/effect/sprite_frames/earth_spike_frames.tres", "frame_width": 192, "frame_height": 1024, "count": 8, "fps": 10.0, "loop": false},
+	{"source": "res://assets/art/effect/projectiles/magic_bolt_sheet.png", "output": "res://assets/art/effect/sprite_frames/magic_bolt_frames.tres", "frame_width": 256, "frame_height": 256, "count": 8, "fps": 12.0, "loop": true},
+	{"source": "res://assets/art/effect/impact/hit_spark_sheet.png", "output": "res://assets/art/effect/sprite_frames/hit_spark_frames.tres", "frame_width": 256, "frame_height": 256, "count": 8, "fps": 12.0, "loop": false},
+	{"source": "res://assets/art/effect/impact/arcane_burst_sheet.png", "output": "res://assets/art/effect/sprite_frames/arcane_burst_frames.tres", "frame_width": 256, "frame_height": 256, "count": 7, "fps": 12.0, "loop": false},
+	{"source": "res://assets/art/effect/heal/heal_circle_sheet.png", "output": "res://assets/art/effect/sprite_frames/heal_circle_frames.tres", "frame_width": 256, "frame_height": 256, "count": 8, "fps": 10.0, "loop": false},
+	{"source": "res://assets/art/effect/boss/earth_spike_sheet.png", "output": "res://assets/art/effect/sprite_frames/earth_spike_frames.tres", "frame_width": 256, "frame_height": 256, "count": 8, "fps": 6.0, "loop": false},
 ]
 
 

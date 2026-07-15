@@ -47,7 +47,7 @@ func play_effect(effect_id: StringName, context: BattleEffectContext = null) -> 
 		return handle
 	layer.add_child(instance)
 	instance.position = resolve_world_position(data, context) - layer.global_position + data.offset
-	instance.scale = data.display_scale
+	instance.scale = data.display_scale * context.scale_multiplier
 	instance.rotation_degrees = data.rotation_degrees
 	if data.remove_baked_checkerboard and instance is CanvasItem:
 		instance.material = checkerboard_material
@@ -103,12 +103,14 @@ func begin_playback(data: BattleEffectData, context: BattleEffectContext, instan
 	var duration := context.duration_override if context.duration_override > 0.0 else data.fallback_duration
 	if instance is AnimatedSprite2D:
 		var animated := instance as AnimatedSprite2D
+		animated.speed_scale = maxf(0.01, context.speed_scale)
 		var animation := data.animation_name
 		if animated.sprite_frames.has_animation(animation):
 			animated.sprite_frames.set_animation_loop(animation, data.loop)
 			animated.play(animation)
 	if data.effect_id == &"warning_circle":
 		play_warning_pulse(instance, duration)
+	duration /= maxf(0.01, context.speed_scale)
 	finish_after(instance, handle, duration, data.auto_destroy)
 
 
@@ -141,6 +143,8 @@ func play_warning_pulse(instance: Node2D, duration: float) -> void:
 
 
 func resolve_world_position(data: BattleEffectData, context: BattleEffectContext) -> Vector2:
+	if context.anchor_override != &"":
+		return get_view_anchor(context.target_view, context.anchor_override)
 	match data.spawn_anchor:
 		EffectDataScript.SpawnAnchor.SOURCE_CENTER:
 			return get_view_anchor(context.source_view, &"center")

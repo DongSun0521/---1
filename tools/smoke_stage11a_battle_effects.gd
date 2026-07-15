@@ -63,10 +63,10 @@ func assert_raw_resources() -> void:
 func assert_sprite_frames() -> void:
 	var specs := {
 		"magic_bolt_frames.tres": [8, 12.0, true],
-		"hit_spark_frames.tres": [7, 12.0, false],
-		"arcane_burst_frames.tres": [8, 12.0, false],
+		"hit_spark_frames.tres": [8, 12.0, false],
+		"arcane_burst_frames.tres": [7, 12.0, false],
 		"heal_circle_frames.tres": [8, 10.0, false],
-		"earth_spike_frames.tres": [8, 10.0, false],
+		"earth_spike_frames.tres": [8, 6.0, false],
 	}
 	for file_name: String in specs:
 		var frames := load("res://assets/art/effect/sprite_frames/%s" % file_name) as SpriteFrames
@@ -81,7 +81,7 @@ func assert_registry(registry) -> void:
 		assert(registry.get_effect(effect_id) != null)
 	for projectile_id: StringName in [&"arrow_projectile", &"magic_bolt_projectile"]:
 		assert(registry.get_projectile(projectile_id) != null)
-	for action_id: StringName in [&"guard_basic_attack", &"hunter_basic_attack", &"mage_basic_attack", &"shield_bash", &"power_shot", &"arcane_blast", &"healing_art", &"medicine", &"ruins_guard_earth_spike"]:
+	for action_id: StringName in [&"guard_basic_attack", &"shield_bash", &"defend", &"hunter_basic_attack", &"power_shot", &"mage_basic_attack", &"arcane_blast", &"doctor_basic_attack", &"healing_art", &"medicine", &"ruins_guard_earth_spike"]:
 		assert(registry.get_action_visual(action_id) != null)
 
 

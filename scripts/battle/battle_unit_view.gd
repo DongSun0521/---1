@@ -19,10 +19,17 @@ var ground_anchor: Marker2D
 var effect_anchor: Marker2D
 var damage_number_anchor: Marker2D
 var is_player_unit: bool = false
+var global_float_layer: Control
+var presentation_tweens: Array[Tween] = []
+var presentation_nodes: Array[Node] = []
 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+
+func _exit_tree() -> void:
+	clear_presentation_visuals()
 
 
 func setup(unit: Dictionary, frames: SpriteFrames, visual: Dictionary) -> void:
@@ -46,12 +53,12 @@ func setup(unit: Dictionary, frames: SpriteFrames, visual: Dictionary) -> void:
 
 
 func build_nodes() -> void:
-	body_center_anchor = create_anchor("BodyCenterAnchor", size * 0.5)
-	ground_anchor = create_anchor("GroundAnchor", Vector2(size.x * 0.5, size.y - 42.0))
-	effect_anchor = create_anchor("EffectAnchor", size * 0.5)
-	damage_number_anchor = create_anchor("DamageNumberAnchor", Vector2(size.x * 0.5, -54.0))
+	body_center_anchor = create_anchor("BodyCenterAnchor", size * 0.5 + visual_data.get("body_center_offset", Vector2.ZERO))
+	ground_anchor = create_anchor("GroundAnchor", Vector2(size.x * 0.5, size.y - 42.0) + visual_data.get("ground_anchor_offset", Vector2.ZERO))
+	effect_anchor = create_anchor("EffectAnchor", size * 0.5 + visual_data.get("effect_anchor_offset", Vector2.ZERO))
+	damage_number_anchor = create_anchor("DamageNumberAnchor", Vector2(size.x * 0.5, -54.0) + visual_data.get("damage_number_offset", Vector2.ZERO))
 	var projectile_x := size.x * (0.78 if is_player_unit else 0.22)
-	projectile_origin = create_anchor("ProjectileOrigin", Vector2(projectile_x, size.y * 0.46))
+	projectile_origin = create_anchor("ProjectileOrigin", Vector2(projectile_x, size.y * 0.46) + visual_data.get("projectile_origin_offset", Vector2.ZERO))
 
 	var shadow := PanelContainer.new()
 	shadow.name = "Shadow"
@@ -145,6 +152,7 @@ func set_highlight(is_visible: bool) -> void:
 
 
 func play_idle() -> void:
+	sprite.speed_scale = 1.0
 	if sprite.sprite_frames != null and sprite.sprite_frames.has_animation(&"idle"):
 		sprite.play(&"idle")
 
@@ -158,9 +166,23 @@ func play_death_hold() -> void:
 func play_once(animation: StringName) -> void:
 	if sprite.sprite_frames == null or not sprite.sprite_frames.has_animation(animation):
 		return
+	sprite.speed_scale = 1.0
 	sprite.play(animation)
 	if not sprite.sprite_frames.get_animation_loop(animation):
 		await sprite.animation_finished
+
+
+func play_animation_until_frame(animation: StringName, release_frame: int, speed_scale: float = 1.0) -> void:
+	if sprite.sprite_frames == null or not sprite.sprite_frames.has_animation(animation):
+		return
+	var frame_count := sprite.sprite_frames.get_frame_count(animation)
+	if frame_count <= 0:
+		return
+	var target_frame := clampi(release_frame, 0, frame_count - 1)
+	sprite.speed_scale = maxf(0.01, speed_scale)
+	sprite.play(animation)
+	while is_inside_tree() and sprite.animation == animation and sprite.frame < target_frame and sprite.is_playing():
+		await sprite.frame_changed
 
 
 func play_hit_or_death(is_defeated: bool) -> void:
@@ -173,20 +195,85 @@ func play_hit_or_death(is_defeated: bool) -> void:
 
 func show_float_text(text: String, color: Color) -> void:
 	var label := create_label(text, 24, color, HORIZONTAL_ALIGNMENT_CENTER)
-	label.position = damage_number_anchor.position - Vector2(size.x * 0.5, 18)
+	presentation_nodes.append(label)
 	label.size = Vector2(size.x, 34)
-	float_layer.add_child(label)
+	if global_float_layer != null and is_instance_valid(global_float_layer):
+		global_float_layer.add_child(label)
+		label.position = damage_number_anchor.global_position - global_float_layer.global_position - Vector2(size.x * 0.5, 18)
+	else:
+		float_layer.add_child(label)
+		label.position = damage_number_anchor.position - Vector2(size.x * 0.5, 18)
 	var tween := create_tween()
+	track_presentation_tween(tween)
 	tween.tween_property(label, "position", label.position + Vector2(0, -54), 0.55)
 	tween.parallel().tween_property(label, "modulate:a", 0.0, 0.55)
-	tween.tween_callback(label.queue_free)
+	tween.tween_callback(free_presentation_node.bind(label))
 
 
 func animate_hp_to(value: int, duration: float = 0.22) -> void:
 	var clamped_value := clampi(value, 0, int(hp_bar.max_value))
 	var tween := create_tween()
+	track_presentation_tween(tween)
 	tween.tween_property(hp_bar, "value", clamped_value, duration)
 	hp_label.text = "%d/%d" % [clamped_value, int(hp_bar.max_value)]
+
+
+func set_global_float_layer(layer: Control) -> void:
+	global_float_layer = layer
+
+
+func play_defend_visual() -> void:
+	if sprite == null:
+		return
+	show_float_text("防御", Color(0.62, 0.86, 1.0))
+	var base_scale: Vector2 = visual_data.get("scale", Vector2.ONE)
+	sprite.scale = base_scale
+	sprite.modulate = Color.WHITE
+	var tween := create_tween()
+	track_presentation_tween(tween)
+	tween.tween_property(sprite, "scale", base_scale * 1.05, 0.12).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.parallel().tween_property(sprite, "modulate", Color(1.28, 1.34, 1.46, 1.0), 0.12)
+	tween.tween_property(sprite, "scale", base_scale, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tween.parallel().tween_property(sprite, "modulate", Color.WHITE, 0.22)
+	await tween.finished
+
+
+func play_visual_recoil(offset: Vector2) -> void:
+	if sprite == null or offset.is_zero_approx():
+		return
+	var base_position := size * 0.5
+	sprite.position = base_position
+	var tween := create_tween()
+	track_presentation_tween(tween)
+	tween.tween_property(sprite, "position", base_position + offset, 0.07).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(sprite, "position", base_position, 0.13).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+func clear_presentation_visuals() -> void:
+	for tween: Tween in presentation_tweens:
+		if tween != null and tween.is_valid():
+			tween.kill()
+	presentation_tweens.clear()
+	for node: Node in presentation_nodes:
+		if is_instance_valid(node):
+			node.queue_free()
+	presentation_nodes.clear()
+	if sprite != null:
+		sprite.position = size * 0.5
+		sprite.scale = visual_data.get("scale", Vector2.ONE)
+		sprite.modulate = Color.WHITE
+		sprite.speed_scale = 1.0
+
+
+func track_presentation_tween(tween: Tween) -> void:
+	presentation_tweens.append(tween)
+	tween.finished.connect(func() -> void: presentation_tweens.erase(tween), CONNECT_ONE_SHOT)
+
+
+func free_presentation_node(node: Node) -> void:
+	presentation_nodes.erase(node)
+	if is_instance_valid(node):
+		node.queue_free()
 
 
 func get_effect_anchor_global_position(anchor_id: StringName) -> Vector2:

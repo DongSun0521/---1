@@ -13,3 +13,8 @@ extends Resource
 @export var attack_impact_frame: int = 3
 @export var click_area_size: Vector2 = Vector2(180, 240)
 @export var hp_bar_offset: Vector2 = Vector2(0, -138)
+@export var projectile_origin_offset: Vector2 = Vector2.ZERO
+@export var body_center_offset: Vector2 = Vector2.ZERO
+@export var ground_anchor_offset: Vector2 = Vector2.ZERO
+@export var effect_anchor_offset: Vector2 = Vector2.ZERO
+@export var damage_number_offset: Vector2 = Vector2.ZERO
