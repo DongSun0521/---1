@@ -1,0 +1,60 @@
+[gd_resource type="SpriteFrames" format=3 uid="uid://6x078sgpo0ol"]
+
+[ext_resource type="Texture2D" uid="uid://hdtou7p0m6jq" path="res://assets/art/effect/impact/arcane_burst_sheet.png" id="1_qhx7m"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_qhx7m"]
+atlas = ExtResource("1_qhx7m")
+region = Rect2(0, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_firnk"]
+atlas = ExtResource("1_qhx7m")
+region = Rect2(256, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_qtvms"]
+atlas = ExtResource("1_qhx7m")
+region = Rect2(512, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_3bvfb"]
+atlas = ExtResource("1_qhx7m")
+region = Rect2(768, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_uwwul"]
+atlas = ExtResource("1_qhx7m")
+region = Rect2(1024, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_non4o"]
+atlas = ExtResource("1_qhx7m")
+region = Rect2(1280, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_pi42a"]
+atlas = ExtResource("1_qhx7m")
+region = Rect2(1536, 0, 256, 256)
+
+[resource]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_qhx7m")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_firnk")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_qtvms")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_3bvfb")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_uwwul")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_non4o")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_pi42a")
+}],
+"loop": false,
+"name": &"play",
+"speed": 12.0
+}]

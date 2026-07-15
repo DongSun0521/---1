@@ -8,6 +8,10 @@ const BATTLE_BACKGROUND_PATH := "res://assets/art/battle/battle.png"
 
 const BattleUnitViewScript := preload("res://scripts/battle/battle_unit_view.gd")
 const BattleVisualRegistryScript := preload("res://scripts/data/battle_visual_registry.gd")
+const BattleEffectRegistryScript := preload("res://scripts/battle/effects/battle_effect_registry.gd")
+const BattleEffectPlayerScript := preload("res://scripts/battle/effects/battle_effect_player.gd")
+const BattleProjectilePlayerScript := preload("res://scripts/battle/effects/battle_projectile_player.gd")
+const BattleEffectContextScript := preload("res://scripts/battle/effects/battle_effect_context.gd")
 
 var game_state
 var visual_registry: RefCounted
@@ -15,9 +19,19 @@ var input_locked: bool = false
 var selected_action: StringName = &""
 var current_targets: Array = []
 var unit_views: Dictionary = {}
+var presentation_in_progress: bool = false
+var effect_registry: BattleEffectRegistry
+var effect_player: BattleEffectPlayer
+var projectile_player: BattleProjectilePlayer
 
 var root: Control
 var battlefield: Control
+var ground_effect_layer: Control
+var unit_layer: Control
+var projectile_layer: Control
+var impact_effect_layer: Control
+var floating_text_layer: Control
+var overlay_effect_layer: Control
 var turn_label: Label
 var target_hint_label: Label
 var log_label: Label
@@ -33,6 +47,7 @@ func _ready() -> void:
 	game_state = get_node("/root/GameState")
 	visual_registry = BattleVisualRegistryScript.new()
 	build_visual_layout()
+	build_effect_runtime()
 	game_state.battle_state_changed.connect(refresh)
 	attack_button.pressed.connect(select_basic_attack)
 	skill_button.pressed.connect(select_skill)
@@ -43,6 +58,8 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	if effect_player != null:
+		effect_player.clear_all_effects()
 	if game_state != null and game_state.battle_state_changed.is_connected(refresh):
 		game_state.battle_state_changed.disconnect(refresh)
 
@@ -77,6 +94,12 @@ func build_visual_layout() -> void:
 	battlefield.name = "Battlefield"
 	battlefield.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.add_child(battlefield)
+	ground_effect_layer = create_battle_layer("GroundEffectLayer")
+	unit_layer = create_battle_layer("UnitLayer")
+	projectile_layer = create_battle_layer("ProjectileLayer")
+	impact_effect_layer = create_battle_layer("ImpactEffectLayer")
+	floating_text_layer = create_battle_layer("FloatingTextLayer")
+	overlay_effect_layer = create_battle_layer("OverlayEffectLayer")
 
 	build_top_ui()
 	build_bottom_ui()
@@ -202,7 +225,7 @@ func update_unit_view(unit: Dictionary, side_index: int) -> void:
 		view.update_state(unit, not input_locked)
 	else:
 		view = BattleUnitViewScript.new()
-		battlefield.add_child(view)
+		unit_layer.add_child(view)
 		unit_views[unit_id] = view
 		view.unit_selected.connect(select_unit_target)
 		var visual: Dictionary = visual_registry.get_visual(unit)
@@ -321,23 +344,30 @@ func select_unit_target(unit_id: StringName) -> void:
 
 
 func start_action(action_id: StringName, target_id: StringName = &"") -> void:
+	if presentation_in_progress:
+		return
+	presentation_in_progress = true
 	input_locked = true
 	result_overlay.visible = false
 	refresh_target_highlights()
 	refresh_action_buttons(game_state.get_battle_state())
 	var success: bool = game_state.execute_battle_action(action_id, target_id)
 	if not success:
+		presentation_in_progress = false
 		input_locked = false
 		refresh()
 		return
 
 	await play_presentation_events(game_state.get_last_battle_presentation_events())
+	if not is_inside_tree():
+		return
 	refresh()
 	if game_state.has_pending_battle_result():
 		show_pending_result()
 		await get_tree().create_timer(0.9).timeout
 		game_state.complete_pending_battle_result()
 	input_locked = false
+	presentation_in_progress = false
 	result_overlay.visible = false
 	selected_action = &""
 	current_targets = []
@@ -347,6 +377,8 @@ func start_action(action_id: StringName, target_id: StringName = &"") -> void:
 func play_presentation_events(events: Array) -> void:
 	for event: Dictionary in events:
 		await play_presentation_event(event)
+		if not is_inside_tree():
+			return
 
 
 func play_presentation_event(event: Dictionary) -> void:
@@ -362,16 +394,66 @@ func play_presentation_event(event: Dictionary) -> void:
 		return
 
 	if action_type == &"medicine":
-		play_target_feedback(event)
-		await get_tree().create_timer(0.45).timeout
+		await present_profile_visual(event, effect_registry.get_action_visual(&"medicine"), source_view)
 		return
 
+	var visual_action_id := resolve_visual_action_id(event)
+	var profile := effect_registry.get_action_visual(visual_action_id)
+	if profile == null:
+		await present_legacy_visual(event, source_view, source_id)
+		return
+	if source_view != null:
+		source_view.sprite.play(&"attack")
+		var release_frame: int = profile.release_frame if profile.release_frame >= 0 else int(round(get_impact_time(source_id) * 10.0))
+		await get_tree().create_timer(maxf(0.0, float(release_frame) / 10.0)).timeout
+	await present_profile_visual(event, profile, source_view)
+	if not is_inside_tree():
+		return
+	if source_view != null and int(get_current_hp(source_id)) > 0:
+		source_view.play_idle()
+
+
+func present_profile_visual(event: Dictionary, profile: BattleActionVisualProfile, source_view) -> void:
+	if profile == null:
+		play_target_feedback(event)
+		await get_tree().create_timer(0.35).timeout
+		return
+	var target_views := get_event_target_views(event)
+	if profile.warning_effect_id != &"":
+		var warning_handles: Array = []
+		for target_view in target_views:
+			var warning_context := make_effect_context(source_view, target_view)
+			warning_context.duration_override = profile.warning_duration
+			warning_handles.append(effect_player.play_effect(profile.warning_effect_id, warning_context))
+		await wait_for_effect_handles(warning_handles)
+
+	if profile.projectile_id != &"" and not target_views.is_empty():
+		await projectile_player.launch_projectile(profile.projectile_id, source_view, target_views[0])
+		play_target_feedback(event)
+		var projectile_feedback_started := Time.get_ticks_msec()
+		var projectile_handles: Array = []
+		if projectile_player.last_impact_handle != null and not projectile_player.last_impact_handle.is_completed:
+			projectile_handles.append(projectile_player.last_impact_handle)
+		await wait_for_target_feedback(event, projectile_handles, projectile_feedback_started)
+		return
+
+	var impact_handles: Array = []
+	if profile.impact_effect_id != &"":
+		for target_view in target_views:
+			impact_handles.append(effect_player.play_effect(profile.impact_effect_id, make_effect_context(source_view, target_view)))
+	if profile.impact_delay > 0.0:
+		await get_tree().create_timer(profile.impact_delay).timeout
+	play_target_feedback(event)
+	var feedback_started := Time.get_ticks_msec()
+	await wait_for_target_feedback(event, impact_handles, feedback_started)
+
+
+func present_legacy_visual(event: Dictionary, source_view, source_id: StringName) -> void:
 	if source_view != null:
 		source_view.sprite.play(&"attack")
 		await get_tree().create_timer(get_impact_time(source_id)).timeout
-
 	play_target_feedback(event)
-	await get_tree().create_timer(0.35).timeout
+	await get_tree().create_timer(0.78 if not event.get("defeated_ids", []).is_empty() else 0.62).timeout
 	if source_view != null and int(get_current_hp(source_id)) > 0:
 		source_view.play_idle()
 
@@ -394,6 +476,92 @@ func play_target_feedback(event: Dictionary) -> void:
 		elif index < healing_values.size():
 			var healing := int(healing_values[index])
 			target_view.show_float_text("+%d" % healing, Color(0.36, 1.0, 0.50))
+		target_view.animate_hp_to(get_current_hp(target_id))
+
+
+func resolve_visual_action_id(event: Dictionary) -> StringName:
+	var action_type := StringName(event.get("action_type", &""))
+	var source_id := StringName(event.get("source_id", &""))
+	var source := get_unit_by_id(source_id)
+	if action_type == &"medicine":
+		return &"medicine"
+	if action_type == &"skill" or action_type == &"heal":
+		return StringName(source.get("skill_id", &""))
+	if action_type == &"group_attack":
+		if source_id == &"ruins_guard":
+			return &"ruins_guard_earth_spike"
+		return StringName(source.get("skill_id", &"arcane_blast"))
+	if action_type == &"attack":
+		if bool(source.get("is_player_unit", false)):
+			return StringName("%s_basic_attack" % source_id)
+		return &"enemy_basic_attack"
+	return action_type
+
+
+func get_event_target_views(event: Dictionary) -> Array:
+	var views: Array = []
+	for raw_target_id in event.get("target_ids", []):
+		var view = unit_views.get(StringName(raw_target_id), null)
+		if view != null:
+			views.append(view)
+	return views
+
+
+func make_effect_context(source_view, target_view) -> BattleEffectContext:
+	var context := BattleEffectContextScript.new()
+	context.source_view = source_view
+	context.target_view = target_view
+	return context
+
+
+func wait_for_effect_handles(handles: Array) -> void:
+	for handle in handles:
+		if handle != null and not handle.is_completed:
+			await handle.completed
+
+
+func wait_for_target_feedback(event: Dictionary, handles: Array, started_msec: int) -> void:
+	await wait_for_effect_handles(handles)
+	var required_duration := 0.28
+	if not event.get("damage_values", []).is_empty():
+		required_duration = 0.62
+	if not event.get("defeated_ids", []).is_empty():
+		required_duration = 0.78
+	var elapsed := float(Time.get_ticks_msec() - started_msec) / 1000.0
+	var remaining := required_duration - elapsed
+	if remaining > 0.0:
+		await get_tree().create_timer(remaining).timeout
+
+
+func build_effect_runtime() -> void:
+	effect_registry = BattleEffectRegistryScript.new()
+	effect_registry.name = "BattleEffectRegistry"
+	add_child(effect_registry)
+	effect_registry.initialize_defaults()
+	effect_player = BattleEffectPlayerScript.new()
+	effect_player.name = "BattleEffectPlayer"
+	add_child(effect_player)
+	effect_player.setup(effect_registry, {
+		&"ground": ground_effect_layer,
+		&"unit": unit_layer,
+		&"projectile": projectile_layer,
+		&"impact": impact_effect_layer,
+		&"floating": floating_text_layer,
+		&"overlay": overlay_effect_layer,
+	})
+	projectile_player = BattleProjectilePlayerScript.new()
+	projectile_player.name = "BattleProjectilePlayer"
+	add_child(projectile_player)
+	projectile_player.setup(effect_registry, effect_player)
+
+
+func create_battle_layer(layer_name: String) -> Control:
+	var layer := Control.new()
+	layer.name = layer_name
+	layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.set_anchors_preset(Control.PRESET_FULL_RECT)
+	battlefield.add_child(layer)
+	return layer
 
 
 func show_pending_result() -> void:

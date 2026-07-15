@@ -88,7 +88,9 @@ func get_final_combat_stat_details(
 	character_id: StringName,
 	party_attack_bonus: int,
 	party_max_hp_bonus: int,
-	equipment_bonuses: Dictionary = {}
+	equipment_bonuses: Dictionary = {},
+	injury_state: StringName = &"healthy",
+	temporary_max_hp_bonus: int = 0
 ) -> Dictionary:
 	var definition = get_character_definition(character_id)
 	if definition == null or definition.base_combat_stats == null:
@@ -100,7 +102,9 @@ func get_final_combat_stat_details(
 			int(base.get("max_hp", 0)),
 			party_max_hp_bonus,
 			0,
-			int(equipment_bonuses.get("max_hp", 0))
+			int(equipment_bonuses.get("max_hp", 0)),
+			injury_state,
+			temporary_max_hp_bonus
 		),
 		"attack": _make_stat_detail(
 			int(base.get("attack", 0)),
@@ -127,9 +131,11 @@ func get_final_combat_stats(
 	character_id: StringName,
 	party_attack_bonus: int,
 	party_max_hp_bonus: int,
-	equipment_bonuses: Dictionary = {}
+	equipment_bonuses: Dictionary = {},
+	injury_state: StringName = &"healthy",
+	temporary_max_hp_bonus: int = 0
 ) -> Dictionary:
-	var details := get_final_combat_stat_details(character_id, party_attack_bonus, party_max_hp_bonus, equipment_bonuses)
+	var details := get_final_combat_stat_details(character_id, party_attack_bonus, party_max_hp_bonus, equipment_bonuses, injury_state, temporary_max_hp_bonus)
 	var stats := {}
 	for stat_id: String in details.keys():
 		stats[stat_id] = int(details[stat_id].get("final", 0))
@@ -174,6 +180,7 @@ func create_party_unit_state(
 		"skill_cooldown": 0,
 		"is_defending": false,
 		"battle_visual_id": definition.battle_visual_id,
+		"injury_state": runtime_state.injury_state if runtime_state != null else &"healthy",
 	}
 
 
@@ -279,11 +286,21 @@ func _build_characters() -> void:
 	)
 
 
-func _make_stat_detail(base: int, village_bonus: int, trait_bonus: int, equipment_bonus: int) -> Dictionary:
+func _make_stat_detail(base: int, village_bonus: int, trait_bonus: int, equipment_bonus: int, injury_state: StringName = &"healthy", temporary_bonus: int = 0) -> Dictionary:
+	var before_injury := base + village_bonus + trait_bonus + equipment_bonus
+	var after_injury := before_injury
+	var injury_multiplier := 1.0
+	if injury_state == &"injured":
+		injury_multiplier = 0.8
+		after_injury = max(1, int(floor(float(before_injury) * injury_multiplier)))
 	return {
 		"base": base,
 		"village_bonus": village_bonus,
 		"trait_bonus": trait_bonus,
 		"equipment_bonus": equipment_bonus,
-		"final": base + village_bonus + trait_bonus + equipment_bonus,
+		"injury_state": injury_state,
+		"injury_multiplier": injury_multiplier,
+		"injury_penalty": after_injury - before_injury,
+		"temporary_bonus": temporary_bonus,
+		"final": after_injury + temporary_bonus,
 	}

@@ -1,0 +1,67 @@
+[gd_resource type="SpriteFrames" format=3 uid="uid://kenagg2b4llc"]
+
+[ext_resource type="Texture2D" uid="uid://v1t5207cajl5" path="res://assets/art/effect/projectiles/magic_bolt_sheet.png" id="1_34cp1"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_34cp1"]
+atlas = ExtResource("1_34cp1")
+region = Rect2(0, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_t1gu7"]
+atlas = ExtResource("1_34cp1")
+region = Rect2(256, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_2s027"]
+atlas = ExtResource("1_34cp1")
+region = Rect2(512, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_j67wi"]
+atlas = ExtResource("1_34cp1")
+region = Rect2(768, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_8qqvt"]
+atlas = ExtResource("1_34cp1")
+region = Rect2(1024, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_wgsny"]
+atlas = ExtResource("1_34cp1")
+region = Rect2(1280, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_j5i6h"]
+atlas = ExtResource("1_34cp1")
+region = Rect2(1536, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_1opem"]
+atlas = ExtResource("1_34cp1")
+region = Rect2(1792, 0, 256, 256)
+
+[resource]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_34cp1")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_t1gu7")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_2s027")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_j67wi")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_8qqvt")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_wgsny")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_j5i6h")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_1opem")
+}],
+"loop": true,
+"name": &"play",
+"speed": 12.0
+}]

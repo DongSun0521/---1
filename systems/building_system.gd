@@ -120,7 +120,7 @@ func _get_work_state(game_state: Node, building_id: StringName, _raw_state: Dict
 				return &"completed"
 			return &"idle"
 		&"hospital":
-			return &"idle"
+			return &"working" if game_state.is_hospital_busy() else &"idle"
 		&"food_workshop":
 			var food_state: Dictionary = game_state.get_food_production_state()
 			if bool(food_state.get("is_active", false)):
@@ -148,6 +148,17 @@ func _get_status_text(game_state: Node, building_id: StringName, raw_state: Dict
 
 
 func _get_project_state(game_state: Node, building_id: StringName) -> Dictionary:
+	if building_id == &"hospital":
+		var hospital_state: Dictionary = game_state.get_hospital_project_state()
+		if not bool(hospital_state.get("is_active", false)):
+			return {}
+		return {
+			"project_id": StringName(hospital_state.get("project_id", &"")),
+			"display_name": String(hospital_state.get("display_name", "Hospital project")),
+			"progress_days": int(hospital_state.get("progress_days", 0)),
+			"required_days": int(hospital_state.get("required_days", 0)),
+			"completed": false,
+		}
 	if building_id == &"food_workshop":
 		var food_state: Dictionary = game_state.get_food_production_state()
 		if not bool(food_state.get("is_active", false)):

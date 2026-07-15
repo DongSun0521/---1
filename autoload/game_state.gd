@@ -1,4 +1,4 @@
-extends Node
+﻿extends Node
 
 signal state_changed
 signal resources_changed
@@ -45,6 +45,12 @@ signal food_recipe_started(recipe_id: StringName)
 signal food_recipe_completed(recipe_id: StringName, output_item_id: StringName, amount: int)
 signal stackable_item_count_changed(item_id: StringName, new_count: int)
 signal expedition_meal_changed(meal_id: StringName)
+signal hospital_state_changed
+signal hospital_project_started(project_type: StringName, target_character_id: StringName)
+signal medicine_production_completed(amount: int)
+signal character_injury_changed(character_id: StringName, injury_state: StringName)
+signal character_treatment_started(character_id: StringName)
+signal character_treatment_completed(character_id: StringName)
 
 const VillageSystemScript := preload("res://systems/village_system.gd")
 const ExpeditionSystemScript := preload("res://systems/expedition_system.gd")
@@ -56,6 +62,8 @@ const CharacterDatabaseScript := preload("res://scripts/data/character_database.
 const EquipmentSystemScript := preload("res://systems/equipment_system.gd")
 const ForgeSystemScript := preload("res://systems/forge_system.gd")
 const FoodWorkshopSystemScript := preload("res://systems/food_workshop_system.gd")
+const HospitalSystemScript := preload("res://systems/hospital_system.gd")
+const DailyReportScript := preload("res://scripts/data/daily_report.gd")
 
 const INITIAL_DAY := 1
 const INITIAL_RESOURCES := {
@@ -80,32 +88,32 @@ const RESOURCE_LABELS := {
 	"medicine": "药品",
 	"ore": "矿石",
 	"herb": "草药",
-	"boss_core": "Boss 核心",
+	"boss_core": "Boss核心",
 }
 const INITIAL_ADVENTURERS := [
 	{
-		"name": "战士",
+		"name": "鎴樺＋",
 		"max_hp": 30,
 		"current_hp": 30,
 		"attack": 5,
 		"defense": 3,
 	},
 	{
-		"name": "猎人",
+		"name": "鐚庝汉",
 		"max_hp": 22,
 		"current_hp": 22,
 		"attack": 7,
 		"defense": 1,
 	},
 	{
-		"name": "法师",
+		"name": "娉曞笀",
 		"max_hp": 18,
 		"current_hp": 18,
 		"attack": 8,
 		"defense": 1,
 	},
 	{
-		"name": "医师",
+		"name": "鍖诲笀",
 		"max_hp": 20,
 		"current_hp": 20,
 		"attack": 3,
@@ -114,23 +122,23 @@ const INITIAL_ADVENTURERS := [
 ]
 const INITIAL_BUILDINGS := {
 	"farm": {
-		"display_name": "农田",
+		"display_name": "鍐滅敯",
 		"level": 1,
-		"status": "正常生产",
+		"status": "姝ｅ父鐢熶骇",
 		"daily_food_production": 4,
 	},
 	"clinic": {
-		"display_name": "医院",
+		"display_name": "鍖婚櫌",
 		"level": 1,
-		"status": "制作药品",
+		"status": "鍒朵綔鑽搧",
 		"medicine_progress": 0,
 		"medicine_progress_required": 2,
 		"medicine_output": 1,
 	},
 	"workshop": {
-		"display_name": "工坊",
+		"display_name": "宸ュ潑",
 		"level": 1,
-		"status": "等待项目",
+		"status": "绛夊緟椤圭洰",
 		"current_project": "",
 	},
 }
@@ -150,6 +158,7 @@ var character_database: RefCounted = CharacterDatabaseScript.new()
 var equipment_system: RefCounted = EquipmentSystemScript.new()
 var forge_system: RefCounted = ForgeSystemScript.new()
 var food_workshop_system: RefCounted = FoodWorkshopSystemScript.new()
+var hospital_system: RefCounted = HospitalSystemScript.new()
 var expedition_state: Dictionary = {}
 var last_expedition_action_report: Dictionary = {}
 var last_expedition_report: Dictionary = {}
@@ -162,6 +171,7 @@ var character_runtime_states: Dictionary = {}
 var equipment_inventory: Dictionary = {}
 var forge_state
 var food_production_state
+var hospital_project_state
 var stackable_item_inventory: Dictionary = {}
 var last_forge_report: Dictionary = {}
 var last_food_workshop_report: Dictionary = {}
@@ -189,6 +199,7 @@ func start_new_game() -> void:
 	equipment_inventory = equipment_system.create_initial_inventory_state()
 	forge_state = forge_system.create_initial_state()
 	food_production_state = food_workshop_system.create_initial_state()
+	hospital_project_state = hospital_system.create_initial_state()
 	stackable_item_inventory = INITIAL_STACKABLE_ITEMS.duplicate(true)
 	last_forge_report = {}
 	last_food_workshop_report = {}
@@ -229,6 +240,7 @@ func start_new_game() -> void:
 	equipment_inventory_changed.emit()
 	forge_state_changed.emit()
 	food_workshop_state_changed.emit()
+	hospital_state_changed.emit()
 	emit_all_stackable_item_count_changed()
 	expedition_meal_changed.emit(&"")
 	daily_report_generated.emit(last_daily_report.duplicate(true))
@@ -239,6 +251,11 @@ func advance_day(reason: String = "manual_test", emit_signals: bool = true) -> D
 	var settled_day: int = current_day
 	last_daily_report = village_system.process_daily_village(self)
 	var food_workshop_daily_report: Dictionary = food_workshop_system.process_daily_production(self)
+	var hospital_daily_report: Dictionary = hospital_system.process_daily_hospital(self)
+	last_daily_report["hospital_report"] = hospital_daily_report.duplicate(true)
+	last_daily_report["medicine_produced"] = int(hospital_daily_report.get("medicine_produced", 0))
+	last_daily_report["medicine_after"] = get_resource_amount("medicine")
+	last_daily_report["medicine_net"] = int(last_daily_report["medicine_after"]) - int(last_daily_report["medicine_before"])
 	var expedition_daily_report: Dictionary = expedition_system.process_daily_consumption(self, last_daily_report)
 	var project_daily_report: Dictionary = project_system.process_daily_project(self)
 	var forge_daily_report: Dictionary = forge_system.process_daily_forge(self)
@@ -256,10 +273,22 @@ func advance_day(reason: String = "manual_test", emit_signals: bool = true) -> D
 	last_daily_report["food_workshop_completed_recipe_id"] = StringName(food_workshop_daily_report.get("recipe_id", &"")) if bool(food_workshop_daily_report.get("food_workshop_completed", false)) else &""
 	last_daily_report["food_workshop_output_item_id"] = StringName(food_workshop_daily_report.get("output_item_id", &""))
 	last_daily_report["food_workshop_output_amount"] = int(food_workshop_daily_report.get("output_amount", 0))
+	last_daily_report["hospital_report"] = hospital_daily_report.duplicate(true)
+	last_daily_report["hospital_project_type"] = StringName(hospital_daily_report.get("hospital_project_type", &""))
+	last_daily_report["hospital_progress_before"] = int(hospital_daily_report.get("hospital_progress_before", 0))
+	last_daily_report["hospital_progress_after"] = int(hospital_daily_report.get("hospital_progress_after", 0))
+	last_daily_report["hospital_required_days"] = int(hospital_daily_report.get("hospital_required_days", 0))
+	last_daily_report["hospital_project_completed"] = bool(hospital_daily_report.get("hospital_project_completed", false))
+	last_daily_report["medicine_produced"] = int(hospital_daily_report.get("medicine_produced", 0))
+	last_daily_report["medicine_after"] = get_resource_amount("medicine")
+	last_daily_report["medicine_net"] = int(last_daily_report["medicine_after"]) - int(last_daily_report["medicine_before"])
+	last_daily_report["treated_character_id"] = StringName(hospital_daily_report.get("treated_character_id", &""))
+	last_daily_report["treatment_completed"] = bool(hospital_daily_report.get("treatment_completed", false))
 	last_daily_report["project_report"] = project_daily_report.duplicate(true)
 	last_daily_report["forge_report"] = forge_daily_report.duplicate(true)
 	last_forge_report = forge_daily_report.duplicate(true)
 	last_food_workshop_report = food_workshop_daily_report.duplicate(true)
+	build_structured_daily_report(last_daily_report)
 
 	if emit_signals:
 		emit_farm_harvest_signals(last_daily_report)
@@ -468,6 +497,81 @@ func start_food_recipe(recipe_id: StringName) -> bool:
 	return true
 
 
+func get_hospital_project_state() -> Dictionary:
+	return hospital_system.get_project_state(self)
+
+
+func get_hospital_medicine_recipe_data() -> Dictionary:
+	return hospital_system.get_medicine_recipe_data(self)
+
+
+func get_active_hospital_summary() -> String:
+	return hospital_system.get_active_summary(self)
+
+
+func is_hospital_busy() -> bool:
+	return hospital_system.is_hospital_busy(self)
+
+
+func get_active_hospital_project_type() -> StringName:
+	return hospital_system.get_active_project_type(self)
+
+
+func get_active_hospital_target_character_id() -> StringName:
+	return hospital_system.get_active_target_character_id(self)
+
+
+func can_start_medicine_production() -> bool:
+	return hospital_system.can_start_medicine_production(self)
+
+
+func get_medicine_disabled_reason() -> String:
+	return hospital_system.get_medicine_disabled_reason(self)
+
+
+func start_medicine_production() -> bool:
+	var report: Dictionary = hospital_system.start_medicine_production(self)
+	if not bool(report.get("success", false)):
+		return false
+	emit_resources_changed()
+	hospital_project_started.emit(StringName(report.get("project_type", &"")), &"")
+	hospital_state_changed.emit()
+	building_project_changed.emit(&"hospital")
+	building_state_changed.emit(&"hospital")
+	state_changed.emit()
+	return true
+
+
+func can_treat_character(character_id: StringName) -> bool:
+	return hospital_system.can_treat_character(self, character_id)
+
+
+func get_treatment_disabled_reason(character_id: StringName) -> String:
+	return hospital_system.get_treatment_disabled_reason(self, character_id)
+
+
+func start_treatment(character_id: StringName) -> bool:
+	var report: Dictionary = hospital_system.start_treatment(self, character_id)
+	if not bool(report.get("success", false)):
+		return false
+	emit_resources_changed()
+	hospital_project_started.emit(StringName(report.get("project_type", &"")), character_id)
+	character_treatment_started.emit(character_id)
+	hospital_state_changed.emit()
+	building_project_changed.emit(&"hospital")
+	building_state_changed.emit(&"hospital")
+	state_changed.emit()
+	return true
+
+
+func is_character_injured(character_id: StringName) -> bool:
+	return hospital_system.is_character_injured(self, character_id)
+
+
+func is_character_being_treated(character_id: StringName) -> bool:
+	return hospital_system.is_character_being_treated(self, character_id)
+
+
 func get_building_state(building_id: StringName) -> Dictionary:
 	if building_system != null and building_system.get_building_data(building_id) != null:
 		return building_system.get_runtime_state(self, building_id)
@@ -508,6 +612,351 @@ func select_building(building_id: StringName) -> void:
 
 func get_last_daily_report() -> Dictionary:
 	return last_daily_report.duplicate(true)
+
+
+func build_structured_daily_report(report: Dictionary) -> void:
+	var daily_report = DailyReportScript.new().setup(
+		int(report.get("settled_day", current_day)),
+		int(report.get("new_day", current_day)),
+		StringName(report.get("reason", &""))
+	)
+	_collect_farm_daily_events(daily_report, report)
+	_collect_food_workshop_daily_events(daily_report, report)
+	_collect_hospital_daily_events(daily_report, report)
+	_collect_forge_daily_events(daily_report, report)
+	_collect_construction_daily_events(daily_report, report)
+	_collect_consumption_daily_events(daily_report, report)
+
+	var structured: Dictionary = daily_report.to_dictionary()
+	for key in structured.keys():
+		report[key] = structured[key]
+	report["daily_summary_lines"] = format_daily_summary_lines(report)
+
+
+func _collect_farm_daily_events(daily_report, report: Dictionary) -> void:
+	var harvests: Array = report.get("farm_harvests", [])
+	var wheat_count := 0
+	var herb_count := 0
+	for harvest: Dictionary in harvests:
+		match StringName(harvest.get("crop_id", &"")):
+			&"wheat":
+				wheat_count += 1
+			&"herb":
+				herb_count += 1
+	if wheat_count > 0:
+		var amount := int(report.get("farm_food_produced", 0))
+		daily_report.add_event(&"farm", {
+			"type": &"harvest",
+			"crop_id": &"wheat",
+			"count": wheat_count,
+			"resource_id": &"food",
+			"amount": amount,
+			"text": "小麦成熟x%d，粮食+%d" % [wheat_count, amount],
+		})
+		daily_report.add_resource_change(&"food", amount, "农田：小麦成熟x%d" % wheat_count)
+	if herb_count > 0:
+		var amount := int(report.get("farm_herb_produced", 0))
+		daily_report.add_event(&"farm", {
+			"type": &"harvest",
+			"crop_id": &"herb",
+			"count": herb_count,
+			"resource_id": &"herb",
+			"amount": amount,
+			"text": "药草成熟x%d，草药+%d" % [herb_count, amount],
+		})
+		daily_report.add_resource_change(&"herb", amount, "农田：药草成熟x%d" % herb_count)
+	if harvests.is_empty() and not report.get("farm_plot_updates", []).is_empty():
+		daily_report.add_event(&"farm", {
+			"type": &"growth",
+			"count": report.get("farm_plot_updates", []).size(),
+			"text": "作物生长推进%d块" % report.get("farm_plot_updates", []).size(),
+		})
+
+
+func _collect_food_workshop_daily_events(daily_report, report: Dictionary) -> void:
+	var food_report: Dictionary = report.get("food_workshop_report", {})
+	if not bool(food_report.get("had_active_food_workshop", false)):
+		return
+	if bool(food_report.get("food_workshop_completed", false)):
+		var item_id := StringName(food_report.get("output_item_id", &""))
+		var amount := int(food_report.get("output_amount", 0))
+		daily_report.add_event(&"food_workshop", {
+			"type": &"completed",
+			"recipe_id": StringName(food_report.get("recipe_id", &"")),
+			"item_id": item_id,
+			"amount": amount,
+			"text": "%s制作完成，%s+%d" % [
+				String(food_report.get("display_name", "食物")),
+				get_item_display_name(item_id),
+				amount,
+			],
+		})
+		daily_report.add_resource_change(item_id, amount, "食物制造所：%s" % String(food_report.get("display_name", "食物")))
+	else:
+		daily_report.add_event(&"food_workshop", {
+			"type": &"progress",
+			"recipe_id": StringName(food_report.get("recipe_id", &"")),
+			"progress_after": int(food_report.get("progress_after", 0)),
+			"required_days": int(food_report.get("required_days", 0)),
+			"text": "%s制作进度 %d/%d" % [
+				String(food_report.get("display_name", "食物")),
+				int(food_report.get("progress_after", 0)),
+				int(food_report.get("required_days", 0)),
+			],
+		})
+
+
+func _collect_hospital_daily_events(daily_report, report: Dictionary) -> void:
+	var hospital_report: Dictionary = report.get("hospital_report", {})
+	if not bool(hospital_report.get("had_active_hospital", false)):
+		return
+	if bool(hospital_report.get("hospital_project_completed", false)):
+		if int(hospital_report.get("medicine_produced", 0)) > 0:
+			var amount := int(hospital_report.get("medicine_produced", 0))
+			daily_report.add_event(&"hospital", {
+				"type": &"medicine_completed",
+				"amount": amount,
+				"text": "基础药品制作完成，药品+%d" % amount,
+			})
+			daily_report.add_resource_change(&"medicine", amount, "医院：基础药品制作完成")
+		elif bool(hospital_report.get("treatment_completed", false)):
+			var character_id := StringName(hospital_report.get("treated_character_id", &""))
+			daily_report.add_event(&"hospital", {
+				"type": &"treatment_completed",
+				"character_id": character_id,
+				"text": "%s治疗完成，状态恢复健康" % get_character_display_name(character_id),
+			})
+	else:
+		var text := "医院项目进度 %d/%d" % [
+			int(hospital_report.get("hospital_progress_after", 0)),
+			int(hospital_report.get("hospital_required_days", 0)),
+		]
+		if StringName(hospital_report.get("hospital_project_type", &"")) == &"treat_character":
+			text = "%s治疗进度 %d/%d" % [
+				get_character_display_name(StringName(hospital_report.get("treated_character_id", &""))),
+				int(hospital_report.get("hospital_progress_after", 0)),
+				int(hospital_report.get("hospital_required_days", 0)),
+			]
+		daily_report.add_event(&"hospital", {
+			"type": &"progress",
+			"project_type": StringName(hospital_report.get("hospital_project_type", &"")),
+			"text": text,
+		})
+
+
+func _collect_forge_daily_events(daily_report, report: Dictionary) -> void:
+	var forge_report: Dictionary = report.get("forge_report", {})
+	if not bool(forge_report.get("had_active_forge", false)):
+		return
+	if bool(forge_report.get("forge_completed", false)):
+		daily_report.add_event(&"weapon_forge", {
+			"type": &"completed",
+			"recipe_id": StringName(forge_report.get("recipe_id", &"")),
+			"equipment_instance_id": StringName(forge_report.get("equipment_instance_id", &"")),
+			"text": "%s制作完成" % String(forge_report.get("result_display_name", forge_report.get("display_name", "装备"))),
+		})
+	else:
+		daily_report.add_event(&"weapon_forge", {
+			"type": &"progress",
+			"recipe_id": StringName(forge_report.get("recipe_id", &"")),
+			"text": "%s制作进度 %d/%d" % [
+				String(forge_report.get("display_name", "装备")),
+				int(forge_report.get("progress_after", 0)),
+				int(forge_report.get("required_days", 0)),
+			],
+		})
+
+
+func _collect_construction_daily_events(daily_report, report: Dictionary) -> void:
+	var project_report: Dictionary = report.get("project_report", {})
+	if not bool(project_report.get("had_active_project", false)):
+		return
+	if bool(project_report.get("project_completed", false)):
+		daily_report.add_event(&"construction", {
+			"type": &"completed",
+			"project_id": StringName(project_report.get("project_id", &"")),
+			"text": "%s完成" % String(project_report.get("display_name", "建设项目")),
+		})
+	else:
+		daily_report.add_event(&"construction", {
+			"type": &"progress",
+			"project_id": StringName(project_report.get("project_id", &"")),
+			"text": "%s进度 %d/%d" % [
+				String(project_report.get("display_name", "建设项目")),
+				int(project_report.get("progress_after", 0)),
+				int(project_report.get("required_days", 0)),
+			],
+		})
+
+
+func _collect_consumption_daily_events(daily_report, report: Dictionary) -> void:
+	var village_food := int(report.get("food_consumed", 0))
+	if village_food > 0:
+		daily_report.add_event(&"village_consumption", {
+			"type": &"food",
+			"amount": village_food,
+			"text": "居民消耗粮食-%d" % village_food,
+		})
+		daily_report.add_resource_change(&"food", -village_food, "村庄：居民消耗")
+	var expedition_rations := int(report.get("expedition_rations_consumed", report.get("expedition_food_consumed", 0)))
+	if expedition_rations > 0:
+		daily_report.add_event(&"expedition_consumption", {
+			"type": &"ration",
+			"amount": expedition_rations,
+			"text": "远征口粮-%d" % expedition_rations,
+		})
+		daily_report.add_resource_change(&"expedition_ration", -expedition_rations, "远征：每日口粮")
+
+
+func format_daily_summary_lines(report: Dictionary) -> Array[String]:
+	var lines: Array[String] = []
+	lines.append("第%d天 -> 第%d天" % [int(report.get("settled_day", report.get("day_before", current_day))), int(report.get("new_day", report.get("day_after", current_day)))])
+	_append_event_section(lines, "农田", report.get("farm_events", []))
+	_append_event_section(lines, "村庄", report.get("village_consumption_events", []))
+	_append_event_section(lines, "食物制造所", report.get("food_workshop_events", []))
+	_append_event_section(lines, "医院", report.get("hospital_events", []))
+	_append_event_section(lines, "远征", report.get("expedition_consumption_events", []))
+	_append_event_section(lines, "建设", report.get("construction_events", []))
+	_append_event_section(lines, "武器制造所", report.get("weapon_forge_events", []))
+	var change_lines := format_resource_change_lines(report.get("resource_changes", {}))
+	if not change_lines.is_empty():
+		lines.append("")
+		lines.append("资源变化：")
+		lines.append_array(change_lines)
+	return lines
+
+
+func _append_event_section(lines: Array[String], title: String, events: Array) -> void:
+	if events.is_empty():
+		return
+	lines.append("")
+	lines.append("%s：" % title)
+	for event: Dictionary in events:
+		lines.append(String(event.get("text", "")))
+
+
+func format_resource_change_lines(changes: Dictionary) -> Array[String]:
+	var lines: Array[String] = []
+	for resource_id in changes.keys():
+		var amount := int(changes[resource_id])
+		if amount == 0:
+			continue
+		var name := get_item_display_name(StringName(resource_id)) if stackable_item_inventory.has(StringName(resource_id)) else get_resource_display_name(String(resource_id))
+		lines.append("%s %s" % [name, format_signed_amount(amount)])
+	return lines
+
+
+func format_signed_amount(amount: int) -> String:
+	if amount > 0:
+		return "+%d" % amount
+	return "%d" % amount
+
+
+func get_projects_completing_in_days(days: int) -> Array:
+	var results: Array = []
+	if food_production_state != null and bool(food_production_state.is_active):
+		var remaining: int = max(0, int(food_production_state.required_days) - int(food_production_state.progress_days))
+		if remaining <= days:
+			var recipe: Dictionary = get_food_recipe_data(StringName(food_production_state.recipe_id))
+			results.append({
+				"system": &"food_workshop",
+				"display_name": String(recipe.get("display_name", "食物")),
+				"remaining_days": remaining,
+				"text": "食物制造所：%s" % String(recipe.get("display_name", "食物")),
+			})
+	if hospital_project_state != null and bool(hospital_project_state.is_active):
+		var remaining: int = max(0, int(hospital_project_state.required_days) - int(hospital_project_state.progress_days))
+		if remaining <= days:
+			var text := "医院：基础药品"
+			if StringName(hospital_project_state.project_type) == &"treat_character":
+				text = "医院：%s治疗完成" % get_character_display_name(StringName(hospital_project_state.target_character_id))
+			results.append({
+				"system": &"hospital",
+				"display_name": text,
+				"remaining_days": remaining,
+				"text": text,
+			})
+	if forge_state != null and bool(forge_state.is_active):
+		var remaining: int = max(0, int(forge_state.required_days) - int(forge_state.progress_days))
+		if remaining <= days:
+			results.append({
+				"system": &"weapon_forge",
+				"display_name": get_active_forge_summary(),
+				"remaining_days": remaining,
+				"text": "武器制造所：%s" % get_active_forge_summary(),
+			})
+	var active_project_id: StringName = StringName(project_state.get("active_project_id", &""))
+	if active_project_id != &"":
+		var project_config: Dictionary = get_project_config(active_project_id)
+		var remaining: int = max(0, int(project_config.get("required_days", 0)) - int(project_state.get("active_project_progress", 0)))
+		if remaining <= days:
+			results.append({
+				"system": &"construction",
+				"display_name": String(project_config.get("display_name", "建设项目")),
+				"remaining_days": remaining,
+				"text": "建设：%s" % String(project_config.get("display_name", "建设项目")),
+			})
+	return results
+
+
+func get_logistics_overview() -> Dictionary:
+	var farm_summary := get_farm_summary()
+	var injured_names: Array[String] = []
+	for character_id: StringName in get_character_ids():
+		if is_character_injured(character_id):
+			injured_names.append(get_character_display_name(character_id))
+	return {
+		"resources": {
+			&"food": get_resource_amount("food"),
+			&"herb": get_resource_amount("herb"),
+			&"expedition_ration": get_item_count(&"expedition_ration"),
+			&"medicine": get_resource_amount("medicine"),
+			&"hearty_stew": get_item_count(&"hearty_stew"),
+			&"hunter_roast": get_item_count(&"hunter_roast"),
+		},
+		"farm": farm_summary,
+		"food_workshop_summary": get_active_food_workshop_summary(),
+		"hospital_summary": get_active_hospital_summary(),
+		"injured_names": injured_names,
+		"forge_summary": get_active_forge_summary(),
+		"construction_summary": get_active_project_summary(),
+		"completing_tomorrow": get_projects_completing_in_days(1),
+	}
+
+
+func get_expedition_readiness_report(carried_food: int, carried_medicine: int, selected_meal_id: StringName = &"") -> Dictionary:
+	var blocking: Array[String] = []
+	var warnings: Array[String] = []
+	var start_error := get_expedition_start_error(carried_food, carried_medicine, selected_meal_id)
+	if not start_error.is_empty():
+		blocking.append(start_error)
+	for character_id: StringName in get_character_ids():
+		if is_character_being_treated(character_id):
+			var text := "%s正在医院接受治疗" % get_character_display_name(character_id)
+			if not blocking.has(text):
+				blocking.append(text)
+		elif is_character_injured(character_id):
+			warnings.append("%s处于受伤状态，最大生命降低20%%" % get_character_display_name(character_id))
+	if carried_medicine <= 0:
+		warnings.append("当前未携带药品")
+	if carried_food <= 1:
+		warnings.append("本次携带远征口粮较少")
+	if get_item_count(&"expedition_ration") <= 2:
+		warnings.append("村庄远征口粮库存较少")
+	if not is_hospital_busy():
+		for character_id: StringName in get_character_ids():
+			if is_character_injured(character_id):
+				warnings.append("医院空闲，仍有受伤角色可治疗")
+				break
+	var completing := get_projects_completing_in_days(1)
+	for item: Dictionary in completing:
+		warnings.append("明天将完成：%s" % String(item.get("text", "")))
+	return {
+		"can_depart": blocking.is_empty(),
+		"blocking": blocking,
+		"warnings": warnings,
+		"completing_soon": completing,
+	}
 
 
 func get_crop_ids() -> Array[StringName]:
@@ -553,14 +1002,19 @@ func is_expedition_active() -> bool:
 
 
 func can_start_expedition(carried_food: int, carried_medicine: int, selected_meal_id: StringName = &"") -> bool:
-	return expedition_system.can_start_expedition(self, carried_food, carried_medicine, selected_meal_id)
+	return get_expedition_start_error(carried_food, carried_medicine, selected_meal_id).is_empty()
 
 
 func get_expedition_start_error(carried_food: int, carried_medicine: int, selected_meal_id: StringName = &"") -> String:
+	for character_id: StringName in get_character_ids():
+		if is_character_being_treated(character_id):
+			return "%s is being treated in the hospital." % get_character_display_name(character_id)
 	return expedition_system.get_start_error(self, carried_food, carried_medicine, selected_meal_id)
 
 
 func start_expedition(carried_food: int, carried_medicine: int, selected_meal_id: StringName = &"") -> bool:
+	if not get_expedition_start_error(carried_food, carried_medicine, selected_meal_id).is_empty():
+		return false
 	if not expedition_system.start_expedition(self, carried_food, carried_medicine, selected_meal_id):
 		return false
 
@@ -602,11 +1056,17 @@ func gather_current_expedition_node() -> bool:
 func return_from_expedition() -> bool:
 	if is_battle_active():
 		return false
+	var injury_snapshots := create_expedition_injury_snapshots()
 	var report: Dictionary = expedition_system.return_to_village(self)
 	if report.is_empty():
 		return false
 
 	var should_complete_mvp: bool = int(report.get("core_gained", 0)) > 0 and not mvp_has_completed
+	var injury_results: Array = hospital_system.process_expedition_injuries(self, false, injury_snapshots)
+	report["character_injury_results"] = injury_results.duplicate(true)
+	report["team_injury_summary"] = get_team_injury_summary()
+	last_expedition_report = report.duplicate(true)
+	emit_injury_result_signals(injury_results)
 	clear_expedition_meal_bonus()
 	restore_character_runtime_states_full()
 	rebuild_adventurers_from_character_data(false)
@@ -731,6 +1191,11 @@ func process_battle_result(result: Dictionary) -> void:
 	else:
 		var report: Dictionary = expedition_system.apply_battle_failure(self, result)
 		statistics["total_failed_expeditions"] = int(statistics.get("total_failed_expeditions", 0)) + 1
+		var injury_results: Array = hospital_system.process_expedition_injuries(self, true)
+		report["character_injury_results"] = injury_results.duplicate(true)
+		report["team_injury_summary"] = get_team_injury_summary()
+		last_expedition_report = report.duplicate(true)
+		emit_injury_result_signals(injury_results)
 		clear_expedition_meal_bonus()
 		restore_character_runtime_states_full()
 		rebuild_adventurers_from_character_data(false)
@@ -776,6 +1241,40 @@ func get_character_ids() -> Array[StringName]:
 	return character_database.get_party_order()
 
 
+func get_character_display_name(character_id: StringName) -> String:
+	var definition = character_database.get_character_definition(character_id)
+	if definition == null:
+		return String(character_id)
+	return String(definition.display_name)
+
+
+func create_expedition_injury_snapshots() -> Array:
+	var snapshots: Array = []
+	for unit: Dictionary in get_battle_party_states():
+		var character_id := StringName(unit.get("character_id", unit.get("unit_id", &"")))
+		if character_id == &"":
+			continue
+		snapshots.append({
+			"character_id": character_id,
+			"return_hp": int(unit.get("current_hp", 0)),
+			"return_max_hp": int(unit.get("max_hp", 1)),
+		})
+	return snapshots
+
+
+func get_team_injury_summary() -> Array:
+	var results: Array = []
+	for character_id: StringName in get_character_ids():
+		var runtime_state = character_runtime_states.get(character_id, null)
+		results.append({
+			"character_id": character_id,
+			"display_name": get_character_display_name(character_id),
+			"injury_state": runtime_state.injury_state if runtime_state != null else &"healthy",
+			"is_being_treated": is_character_being_treated(character_id),
+		})
+	return results
+
+
 func get_character_definition(character_id: StringName) -> Dictionary:
 	var definition = character_database.get_character_definition(character_id)
 	if definition == null:
@@ -802,20 +1301,28 @@ func get_profession_display_name(profession_id: StringName) -> String:
 
 
 func get_final_combat_stat_details(character_id: StringName) -> Dictionary:
+	var runtime_state = character_runtime_states.get(character_id, null)
+	var injury_state: StringName = runtime_state.injury_state if runtime_state != null else &"healthy"
 	return character_database.get_final_combat_stat_details(
 		character_id,
 		party_attack_bonus + get_expedition_meal_attack_bonus(),
-		party_max_hp_bonus + get_expedition_meal_max_hp_bonus(),
-		get_character_equipment_bonuses(character_id)
+		party_max_hp_bonus,
+		get_character_equipment_bonuses(character_id),
+		injury_state,
+		get_expedition_meal_max_hp_bonus()
 	)
 
 
 func get_final_combat_stats(character_id: StringName) -> Dictionary:
+	var runtime_state = character_runtime_states.get(character_id, null)
+	var injury_state: StringName = runtime_state.injury_state if runtime_state != null else &"healthy"
 	return character_database.get_final_combat_stats(
 		character_id,
 		party_attack_bonus + get_expedition_meal_attack_bonus(),
-		party_max_hp_bonus + get_expedition_meal_max_hp_bonus(),
-		get_character_equipment_bonuses(character_id)
+		party_max_hp_bonus,
+		get_character_equipment_bonuses(character_id),
+		injury_state,
+		get_expedition_meal_max_hp_bonus()
 	)
 
 
@@ -952,13 +1459,17 @@ func update_character_runtime_states_from_party(party_states: Array) -> void:
 
 func restore_character_runtime_states_full() -> void:
 	for character_id: StringName in character_database.get_party_order():
-		var runtime_state = character_runtime_states.get(character_id, null)
-		if runtime_state == null:
-			continue
-		var final_stats: Dictionary = get_final_combat_stats(character_id)
-		runtime_state.current_hp = int(final_stats.get("max_hp", runtime_state.current_hp))
-		character_runtime_states[character_id] = runtime_state
-		character_runtime_state_changed.emit(character_id)
+		restore_character_runtime_state_full(character_id)
+
+
+func restore_character_runtime_state_full(character_id: StringName) -> void:
+	var runtime_state = character_runtime_states.get(character_id, null)
+	if runtime_state == null:
+		return
+	var final_stats: Dictionary = get_final_combat_stats(character_id)
+	runtime_state.current_hp = int(final_stats.get("max_hp", runtime_state.current_hp))
+	character_runtime_states[character_id] = runtime_state
+	character_runtime_state_changed.emit(character_id)
 
 
 func apply_party_attack_bonus(amount: int) -> void:
@@ -1040,7 +1551,7 @@ func is_current_battle_node_cleared() -> bool:
 
 
 func get_resource_summary() -> String:
-	return "第 %d 天 | 粮食 %d | 远征口粮 %d | 药品 %d | 矿石 %d | 草药 %d | 核心 %d" % [
+	return "第 %d 天 | 粮食 %d | 远征口粮 %d | 药品 %d | 矿石 %d | 草药 %d | Boss核心 %d" % [
 		current_day,
 		get_resource_amount("food"),
 		get_item_count(&"expedition_ration"),
@@ -1053,15 +1564,21 @@ func get_resource_summary() -> String:
 func get_adventurer_summary() -> String:
 	var lines := PackedStringArray()
 	for adventurer: Dictionary in adventurers:
-		lines.append("%s：生命 %d/%d | 攻击 %d | 防御 %d" % [
+		var character_id := StringName(adventurer.get("character_id", adventurer.get("unit_id", &"")))
+		var state_text := "健康"
+		if StringName(adventurer.get("injury_state", &"healthy")) == &"injured":
+			state_text = "受伤"
+		if is_character_being_treated(character_id):
+			state_text = "治疗中"
+		lines.append("%s：生命 %d/%d | 攻击 %d | 防御 %d | %s" % [
 			String(adventurer.get("display_name", adventurer.get("name", ""))),
 			int(adventurer["current_hp"]),
 			int(adventurer["max_hp"]),
 			int(adventurer["attack"]),
 			int(adventurer["defense"]),
+			state_text,
 		])
 	return "\n".join(lines)
-
 
 func get_growth_summary() -> Dictionary:
 	var farm_summary := get_farm_summary()
@@ -1153,6 +1670,20 @@ func emit_after_day_advanced() -> void:
 			StringName(food_workshop_report.get("output_item_id", &"")),
 			get_item_count(StringName(food_workshop_report.get("output_item_id", &"")))
 		)
+	var hospital_report: Dictionary = last_daily_report.get("hospital_report", {})
+	if bool(hospital_report.get("had_active_hospital", false)):
+		hospital_state_changed.emit()
+		building_project_changed.emit(&"hospital")
+		building_state_changed.emit(&"hospital")
+	if bool(hospital_report.get("hospital_project_completed", false)):
+		if int(hospital_report.get("medicine_produced", 0)) > 0:
+			medicine_production_completed.emit(int(hospital_report.get("medicine_produced", 0)))
+		if bool(hospital_report.get("treatment_completed", false)):
+			var treated_id := StringName(hospital_report.get("treated_character_id", &""))
+			character_treatment_completed.emit(treated_id)
+			character_injury_changed.emit(treated_id, &"healthy")
+			character_runtime_state_changed.emit(treated_id)
+			character_final_stats_changed.emit(treated_id)
 	if is_expedition_active():
 		supplies_changed.emit()
 		expedition_state_changed.emit()
@@ -1172,6 +1703,16 @@ func emit_all_character_runtime_state_changed() -> void:
 
 func emit_all_character_final_stats_changed() -> void:
 	for character_id: StringName in character_database.get_party_order():
+		character_final_stats_changed.emit(character_id)
+
+
+func emit_injury_result_signals(injury_results: Array) -> void:
+	for result: Dictionary in injury_results:
+		var character_id := StringName(result.get("character_id", &""))
+		if character_id == &"":
+			continue
+		character_injury_changed.emit(character_id, StringName(result.get("new_injury_state", &"healthy")))
+		character_runtime_state_changed.emit(character_id)
 		character_final_stats_changed.emit(character_id)
 
 

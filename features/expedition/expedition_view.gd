@@ -544,6 +544,17 @@ func refresh_action_report(report: Dictionary) -> void:
 	var lines := PackedStringArray()
 	lines.append("第%d天结算" % int(report["new_day"]))
 	lines.append(String(report["action_text"]))
+	if report.has("daily_summary_lines"):
+		lines.append("")
+		lines.append("后方消息")
+		var summary_lines: Array = report.get("daily_summary_lines", [])
+		for raw_line in summary_lines:
+			var line := String(raw_line)
+			if line.begins_with("第"):
+				continue
+			lines.append(line)
+		action_report_label.text = "\n".join(lines)
+		return
 	lines.append("远征口粮：-%d" % int(report["expedition_food_consumed"]))
 	if report.has("gather_resource") and int(report.get("gather_amount", 0)) > 0:
 		lines.append("%s：+%d" % [

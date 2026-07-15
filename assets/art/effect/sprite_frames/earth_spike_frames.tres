@@ -1,0 +1,67 @@
+[gd_resource type="SpriteFrames" format=3 uid="uid://clldgwh70ciut"]
+
+[ext_resource type="Texture2D" uid="uid://dqhnwb2ghumeq" path="res://assets/art/effect/boss/earth_spike_sheet.png" id="1_eavmv"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_eavmv"]
+atlas = ExtResource("1_eavmv")
+region = Rect2(0, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_6ctsb"]
+atlas = ExtResource("1_eavmv")
+region = Rect2(256, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_7vvnw"]
+atlas = ExtResource("1_eavmv")
+region = Rect2(512, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_4spar"]
+atlas = ExtResource("1_eavmv")
+region = Rect2(768, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_x80bq"]
+atlas = ExtResource("1_eavmv")
+region = Rect2(1024, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_812gc"]
+atlas = ExtResource("1_eavmv")
+region = Rect2(1280, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_tdvk6"]
+atlas = ExtResource("1_eavmv")
+region = Rect2(1536, 0, 256, 256)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_pdo2p"]
+atlas = ExtResource("1_eavmv")
+region = Rect2(1792, 0, 256, 256)
+
+[resource]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_eavmv")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_6ctsb")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_7vvnw")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_4spar")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_x80bq")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_812gc")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_tdvk6")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_pdo2p")
+}],
+"loop": false,
+"name": &"play",
+"speed": 6.0
+}]

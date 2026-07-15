@@ -18,7 +18,6 @@ func advance_day(game_state, reason: String = "manual_test") -> Dictionary:
 func process_daily_village(game_state) -> Dictionary:
 	var resources: Dictionary = game_state.resources
 	var buildings: Dictionary = game_state.buildings
-	var clinic: Dictionary = buildings[CLINIC_ID]
 
 	var food_before: int = int(resources["food"])
 	var medicine_before: int = int(resources["medicine"])
@@ -35,18 +34,12 @@ func process_daily_village(game_state) -> Dictionary:
 	resources = game_state.resources
 
 	var medicine_produced := 0
-	var medicine_progress: int = int(clinic["medicine_progress"]) + 1
-	var medicine_progress_required: int = int(clinic["medicine_progress_required"])
-	if medicine_progress >= medicine_progress_required:
-		medicine_produced = int(clinic["medicine_output"])
-		resources["medicine"] = int(resources["medicine"]) + medicine_produced
-		medicine_progress = 0
-	clinic["medicine_progress"] = medicine_progress
+	var medicine_progress := 0
+	var medicine_progress_required := 0
 
 	var food_consumed: int = min(VILLAGE_DAILY_FOOD_CONSUMPTION, int(resources["food"]))
 	resources["food"] = max(0, int(resources["food"]) - food_consumed)
 
-	buildings[CLINIC_ID] = clinic
 	game_state.resources = resources
 	game_state.buildings = buildings
 

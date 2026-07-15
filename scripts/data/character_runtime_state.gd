@@ -7,6 +7,7 @@ var equipped_weapon_id: StringName = &""
 var equipped_armor_id: StringName = &""
 var equipped_weapon_instance_id: StringName = &""
 var equipped_armor_instance_id: StringName = &""
+var injury_state: StringName = &"healthy"
 
 
 func setup(
@@ -15,7 +16,8 @@ func setup(
 	p_equipped_weapon_id: StringName = &"",
 	p_equipped_armor_id: StringName = &"",
 	p_equipped_weapon_instance_id: StringName = &"",
-	p_equipped_armor_instance_id: StringName = &""
+	p_equipped_armor_instance_id: StringName = &"",
+	p_injury_state: StringName = &"healthy"
 ):
 	character_id = p_character_id
 	current_hp = p_current_hp
@@ -23,6 +25,7 @@ func setup(
 	equipped_armor_id = p_equipped_armor_id
 	equipped_weapon_instance_id = p_equipped_weapon_instance_id
 	equipped_armor_instance_id = p_equipped_armor_instance_id
+	injury_state = p_injury_state
 	return self
 
 
@@ -34,4 +37,5 @@ func to_dictionary() -> Dictionary:
 		"equipped_armor_id": equipped_armor_id,
 		"equipped_weapon_instance_id": equipped_weapon_instance_id,
 		"equipped_armor_instance_id": equipped_armor_instance_id,
+		"injury_state": injury_state,
 	}

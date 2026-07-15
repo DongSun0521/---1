@@ -15,6 +15,7 @@ var building_views: Dictionary = {}
 
 var resource_label: Label
 var adventurer_label: Label
+var logistics_overview_label: Label
 var detail_panel: PanelContainer
 var detail_title_label: Label
 var detail_body_label: Label
@@ -30,6 +31,7 @@ var food_spin_box: SpinBox
 var medicine_spin_box: SpinBox
 var expected_days_label: Label
 var prep_status_label: Label
+var readiness_label: Label
 var start_expedition_button: Button
 var advance_day_button: Button
 var character_page: PanelContainer
@@ -71,6 +73,12 @@ var food_workshop_inventory_label: Label
 var food_workshop_project_label: Label
 var food_recipe_list_box: VBoxContainer
 var food_workshop_feedback_label: Label
+var hospital_section: VBoxContainer
+var hospital_inventory_label: Label
+var hospital_project_label: Label
+var hospital_recipe_box: VBoxContainer
+var hospital_character_list_box: VBoxContainer
+var hospital_feedback_label: Label
 var selected_meal_id: StringName = &""
 var meal_option_buttons: Dictionary = {}
 var farm_assign_confirm_dialog: ConfirmationDialog
@@ -111,6 +119,12 @@ func _ready() -> void:
 	game_state.food_recipe_started.connect(on_food_recipe_report)
 	game_state.food_recipe_completed.connect(on_food_recipe_completed)
 	game_state.stackable_item_count_changed.connect(on_stackable_item_changed)
+	game_state.hospital_state_changed.connect(on_hospital_data_changed)
+	game_state.hospital_project_started.connect(on_hospital_project_started)
+	game_state.medicine_production_completed.connect(on_medicine_production_completed)
+	game_state.character_treatment_started.connect(on_character_treatment_started)
+	game_state.character_treatment_completed.connect(on_character_treatment_completed)
+	game_state.character_injury_changed.connect(on_character_injury_changed)
 	game_state.building_state_changed.connect(on_building_state_changed)
 	advance_day_button.pressed.connect(advance_day)
 	food_spin_box.value_changed.connect(on_supply_value_changed)
@@ -148,6 +162,18 @@ func _exit_tree() -> void:
 		game_state.food_recipe_completed.disconnect(on_food_recipe_completed)
 	if game_state != null and game_state.stackable_item_count_changed.is_connected(on_stackable_item_changed):
 		game_state.stackable_item_count_changed.disconnect(on_stackable_item_changed)
+	if game_state != null and game_state.hospital_state_changed.is_connected(on_hospital_data_changed):
+		game_state.hospital_state_changed.disconnect(on_hospital_data_changed)
+	if game_state != null and game_state.hospital_project_started.is_connected(on_hospital_project_started):
+		game_state.hospital_project_started.disconnect(on_hospital_project_started)
+	if game_state != null and game_state.medicine_production_completed.is_connected(on_medicine_production_completed):
+		game_state.medicine_production_completed.disconnect(on_medicine_production_completed)
+	if game_state != null and game_state.character_treatment_started.is_connected(on_character_treatment_started):
+		game_state.character_treatment_started.disconnect(on_character_treatment_started)
+	if game_state != null and game_state.character_treatment_completed.is_connected(on_character_treatment_completed):
+		game_state.character_treatment_completed.disconnect(on_character_treatment_completed)
+	if game_state != null and game_state.character_injury_changed.is_connected(on_character_injury_changed):
+		game_state.character_injury_changed.disconnect(on_character_injury_changed)
 	if game_state != null and game_state.building_state_changed.is_connected(on_building_state_changed):
 		game_state.building_state_changed.disconnect(on_building_state_changed)
 
@@ -216,7 +242,7 @@ func refresh_building_views() -> void:
 func build_overview_panel() -> void:
 	var panel := create_panel("VillageOverviewPanel", 0.9)
 	panel.z_index = 100
-	set_anchor_rect(panel, Rect2(0.02, 0.03, 0.32, 0.22))
+	set_anchor_rect(panel, Rect2(0.02, 0.03, 0.32, 0.34))
 	add_child(panel)
 
 	var margin := create_margin(14)
@@ -237,6 +263,27 @@ func build_overview_panel() -> void:
 
 	adventurer_label = create_label("", 16, Color(0.90, 0.90, 0.84), HORIZONTAL_ALIGNMENT_LEFT)
 	content.add_child(adventurer_label)
+
+	logistics_overview_label = create_label("", 15, Color(0.91, 0.93, 0.84), HORIZONTAL_ALIGNMENT_LEFT)
+	content.add_child(logistics_overview_label)
+
+	var logistics_button_row := HBoxContainer.new()
+	logistics_button_row.add_theme_constant_override("separation", 6)
+	content.add_child(logistics_button_row)
+	var logistics_buttons := {
+		&"farm": "农田",
+		&"food_workshop": "食物",
+		&"hospital": "医院",
+		&"weapon_forge": "锻造",
+	}
+	for building_id: StringName in logistics_buttons.keys():
+		var button := Button.new()
+		button.text = String(logistics_buttons[building_id])
+		button.custom_minimum_size = Vector2(70, 30)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		apply_button_style(button, false)
+		button.pressed.connect(select_building.bind(building_id))
+		logistics_button_row.add_child(button)
 
 
 func build_detail_panel() -> void:
@@ -302,6 +349,7 @@ func build_detail_panel() -> void:
 
 	build_farm_section(content)
 	build_food_workshop_section(content)
+	build_hospital_section(content)
 	build_project_section(content)
 	build_prep_section(content)
 	build_daily_report_section(content)
@@ -380,6 +428,35 @@ func build_food_workshop_section(parent: Control) -> void:
 	food_workshop_section.add_child(food_workshop_feedback_label)
 
 
+func build_hospital_section(parent: Control) -> void:
+	hospital_section = VBoxContainer.new()
+	hospital_section.add_theme_constant_override("separation", 10)
+	parent.add_child(hospital_section)
+
+	var title := create_label("医院", 24, Color(0.98, 0.86, 0.58), HORIZONTAL_ALIGNMENT_LEFT)
+	hospital_section.add_child(title)
+
+	hospital_inventory_label = create_label("", 18, Color(0.92, 0.93, 0.86), HORIZONTAL_ALIGNMENT_LEFT)
+	hospital_section.add_child(hospital_inventory_label)
+
+	hospital_project_label = create_label("", 18, Color(0.92, 0.93, 0.86), HORIZONTAL_ALIGNMENT_LEFT)
+	hospital_section.add_child(hospital_project_label)
+
+	hospital_recipe_box = VBoxContainer.new()
+	hospital_recipe_box.add_theme_constant_override("separation", 8)
+	hospital_section.add_child(hospital_recipe_box)
+
+	var wounded_title := create_label("伤员", 20, Color(0.98, 0.86, 0.58), HORIZONTAL_ALIGNMENT_LEFT)
+	hospital_section.add_child(wounded_title)
+
+	hospital_character_list_box = VBoxContainer.new()
+	hospital_character_list_box.add_theme_constant_override("separation", 8)
+	hospital_section.add_child(hospital_character_list_box)
+
+	hospital_feedback_label = create_label("", 17, Color(0.94, 0.84, 0.58), HORIZONTAL_ALIGNMENT_LEFT)
+	hospital_section.add_child(hospital_feedback_label)
+
+
 func build_project_section(parent: Control) -> void:
 	project_section = VBoxContainer.new()
 	project_section.add_theme_constant_override("separation", 10)
@@ -447,6 +524,9 @@ func build_prep_section(parent: Control) -> void:
 
 	prep_status_label = create_label("", 19, Color(0.92, 0.88, 0.72), HORIZONTAL_ALIGNMENT_LEFT)
 	prep_section.add_child(prep_status_label)
+
+	readiness_label = create_label("", 17, Color(0.90, 0.91, 0.84), HORIZONTAL_ALIGNMENT_LEFT)
+	prep_section.add_child(readiness_label)
 
 	start_expedition_button = Button.new()
 	start_expedition_button.text = "确认出发"
@@ -941,6 +1021,8 @@ func open_character_page_from_forge() -> void:
 func refresh() -> void:
 	resource_label.text = game_state.get_resource_summary()
 	adventurer_label.text = game_state.get_adventurer_summary()
+	if logistics_overview_label != null:
+		logistics_overview_label.text = format_logistics_overview()
 	refresh_building_views()
 	refresh_projects()
 	refresh_expedition_prep()
@@ -952,6 +1034,44 @@ func refresh() -> void:
 		refresh_forge_page()
 
 
+func format_logistics_overview() -> String:
+	var overview: Dictionary = game_state.get_logistics_overview()
+	var resources: Dictionary = overview.get("resources", {})
+	var farm_summary: Dictionary = overview.get("farm", {})
+	var crop_counts: Dictionary = farm_summary.get("crop_counts", {})
+	var injured_names: Array = overview.get("injured_names", [])
+	var completing: Array = overview.get("completing_tomorrow", [])
+	var lines := PackedStringArray()
+	lines.append("后勤总览")
+	lines.append("粮食%d  草药%d  口粮%d  药品%d" % [
+		int(resources.get(&"food", 0)),
+		int(resources.get(&"herb", 0)),
+		int(resources.get(&"expedition_ration", 0)),
+		int(resources.get(&"medicine", 0)),
+	])
+	lines.append("料理：炖汤%d  烤肉%d" % [
+		int(resources.get(&"hearty_stew", 0)),
+		int(resources.get(&"hunter_roast", 0)),
+	])
+	lines.append("农田：种植中 %d/%d，小麦%d，药草%d，%s" % [
+		int(farm_summary.get("active_plot_count", crop_counts.values().size())),
+		int(farm_summary.get("unlocked_plot_count", 0)),
+		int(crop_counts.get(&"wheat", 0)),
+		int(crop_counts.get(&"herb", 0)),
+		format_next_harvest_text(int(farm_summary.get("next_harvest_days", 0))),
+	])
+	lines.append("食物制造所：%s" % String(overview.get("food_workshop_summary", "")))
+	lines.append("医院：%s" % String(overview.get("hospital_summary", "")))
+	lines.append("受伤角色：%s" % ("无" if injured_names.is_empty() else "、".join(PackedStringArray(injured_names))))
+	lines.append("武器制造所：%s" % String(overview.get("forge_summary", "")))
+	if not completing.is_empty():
+		var parts := PackedStringArray()
+		for item: Dictionary in completing:
+			parts.append(String(item.get("text", "")))
+		lines.append("明天完成：%s" % "；".join(parts))
+	return "\n".join(lines)
+
+
 func refresh_detail_panel() -> void:
 	var selected_data = game_state.get_building_data(selected_panel_id)
 	workshop_art_rect.texture = get_building_level_texture(selected_panel_id)
@@ -959,11 +1079,13 @@ func refresh_detail_panel() -> void:
 	forge_entry_button.visible = selected_panel_id == &"weapon_forge"
 	farm_section.visible = selected_panel_id == &"farm"
 	food_workshop_section.visible = selected_panel_id == &"food_workshop"
+	hospital_section.visible = selected_panel_id == &"hospital"
 	project_section.visible = selected_panel_id == &"weapon_forge" or selected_panel_id == &"project"
 	prep_section.visible = selected_panel_id == &"prep"
 	refresh_building_level_test(selected_data)
 	refresh_farm_section()
 	refresh_food_workshop_section()
+	refresh_hospital_section()
 
 	if selected_data != null:
 		detail_title_label.text = "%s  Lv.%d" % [
@@ -971,6 +1093,8 @@ func refresh_detail_panel() -> void:
 			int(game_state.get_building_state(selected_panel_id).get("level", 1)),
 		]
 		detail_body_label.text = format_building_operation_text(selected_panel_id)
+		if selected_panel_id == &"hospital":
+			detail_body_label.text = "当前功能：主动制药或治疗受伤角色。\n当前医院项目：%s" % game_state.get_active_hospital_summary()
 		return
 
 	match selected_panel_id:
@@ -1305,6 +1429,136 @@ func start_food_recipe(recipe_id: StringName) -> void:
 	refresh_building_views()
 
 
+func refresh_hospital_section() -> void:
+	if hospital_section == null:
+		return
+	hospital_section.visible = selected_panel_id == &"hospital"
+	if not hospital_section.visible:
+		return
+
+	hospital_inventory_label.text = "当前库存：\n草药：%d\n药品：%d" % [
+		game_state.get_resource_amount("herb"),
+		game_state.get_resource_amount("medicine"),
+	]
+
+	var project_state: Dictionary = game_state.get_hospital_project_state()
+	if bool(project_state.get("is_active", false)):
+		var remaining: int = max(0, int(project_state.get("required_days", 0)) - int(project_state.get("progress_days", 0)))
+		hospital_project_label.text = "当前项目：%s\n进度：%d / %d天\n剩余：%d天" % [
+			String(project_state.get("display_name", "医院项目")),
+			int(project_state.get("progress_days", 0)),
+			int(project_state.get("required_days", 0)),
+			remaining,
+		]
+	else:
+		hospital_project_label.text = "当前项目：空闲"
+
+	for child: Node in hospital_recipe_box.get_children():
+		child.queue_free()
+	hospital_recipe_box.add_child(create_hospital_medicine_card(game_state.get_hospital_medicine_recipe_data()))
+
+	for child: Node in hospital_character_list_box.get_children():
+		child.queue_free()
+	for character_id: StringName in game_state.get_character_ids():
+		hospital_character_list_box.add_child(create_hospital_character_card(character_id))
+
+
+func create_hospital_medicine_card(recipe: Dictionary) -> Control:
+	var panel := create_dark_panel("HospitalMedicineCard", 0.82)
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var margin := create_margin(10)
+	panel.add_child(margin)
+	var root := VBoxContainer.new()
+	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.add_theme_constant_override("separation", 6)
+	margin.add_child(root)
+
+	root.add_child(create_label(String(recipe.get("display_name", "制作基础药品")), 20, Color(1.0, 0.90, 0.62), HORIZONTAL_ALIGNMENT_LEFT))
+	root.add_child(create_label(String(recipe.get("description", "")), 16, Color(0.90, 0.90, 0.82), HORIZONTAL_ALIGNMENT_LEFT))
+	root.add_child(create_label("消耗：草药×%d\n工期：%d天\n产出：药品×%d" % [
+		int(recipe.get("herb_cost", 0)),
+		int(recipe.get("required_days", 0)),
+		int(recipe.get("medicine_output", 0)),
+	], 17, Color(0.94, 0.94, 0.86), HORIZONTAL_ALIGNMENT_LEFT))
+
+	var error_text := String(recipe.get("start_error", ""))
+	var button := Button.new()
+	button.text = "开始制药" if error_text.is_empty() else error_text
+	button.custom_minimum_size = Vector2(0, 38)
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.disabled = not error_text.is_empty()
+	button.tooltip_text = error_text
+	apply_button_style(button, true)
+	button.pressed.connect(start_hospital_medicine_production)
+	root.add_child(button)
+	return panel
+
+
+func create_hospital_character_card(character_id: StringName) -> Control:
+	var panel := create_dark_panel("HospitalCharacterCard", 0.82)
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var margin := create_margin(10)
+	panel.add_child(margin)
+	var root := VBoxContainer.new()
+	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.add_theme_constant_override("separation", 6)
+	margin.add_child(root)
+
+	var detail: Dictionary = game_state.get_character_detail(character_id)
+	var definition: Dictionary = detail.get("definition", {})
+	var injury_state := StringName(detail.get("runtime_state", {}).get("injury_state", &"healthy"))
+	var is_treating: bool = game_state.is_character_being_treated(character_id)
+	var state_text := "治疗中" if is_treating else ("受伤" if injury_state == &"injured" else "健康")
+	root.add_child(create_label("%s  %s" % [
+		String(definition.get("display_name", character_id)),
+		String(detail.get("profession_display_name", "")),
+	], 20, Color(1.0, 0.90, 0.62), HORIZONTAL_ALIGNMENT_LEFT))
+
+	var body := "状态：%s" % state_text
+	if is_treating:
+		var hospital_state: Dictionary = game_state.get_hospital_project_state()
+		body += "\n进度：%d / %d天" % [
+			int(hospital_state.get("progress_days", 0)),
+			int(hospital_state.get("required_days", 0)),
+		]
+	elif injury_state == &"injured":
+		body += "\n最大生命降低20%\n治疗消耗：草药×1\n治疗时间：1天"
+	else:
+		body += "\n无需治疗"
+	root.add_child(create_label(body, 17, Color(0.94, 0.94, 0.86), HORIZONTAL_ALIGNMENT_LEFT))
+
+	var error_text: String = game_state.get_treatment_disabled_reason(character_id)
+	var button := Button.new()
+	button.text = "开始治疗" if error_text.is_empty() else error_text
+	button.custom_minimum_size = Vector2(0, 38)
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.disabled = not error_text.is_empty()
+	button.tooltip_text = error_text
+	apply_button_style(button, false)
+	button.pressed.connect(start_hospital_treatment.bind(character_id))
+	root.add_child(button)
+	return panel
+
+
+func start_hospital_medicine_production() -> void:
+	if game_state.start_medicine_production():
+		hospital_feedback_label.text = "已开始制作基础药品。"
+	else:
+		hospital_feedback_label.text = game_state.get_medicine_disabled_reason()
+	refresh_hospital_section()
+	refresh_building_views()
+
+
+func start_hospital_treatment(character_id: StringName) -> void:
+	if game_state.start_treatment(character_id):
+		hospital_feedback_label.text = "已开始治疗：%s" % game_state.get_character_display_name(character_id)
+	else:
+		hospital_feedback_label.text = game_state.get_treatment_disabled_reason(character_id)
+	refresh_hospital_section()
+	refresh_expedition_prep()
+	refresh_building_views()
+
+
 func refresh_projects() -> void:
 	var growth: Dictionary = game_state.get_growth_summary()
 	growth_label.text = "农田 Lv.%d（每日粮食 %d） | 医院 Lv.%d（%d 天/药品）\n队伍攻击 +%d | 队伍生命 +%d" % [
@@ -1317,6 +1571,16 @@ func refresh_projects() -> void:
 	]
 
 	project_status_label.text = game_state.get_active_project_summary()
+	growth_label.text = "农田 Lv.%d：种植中 %d/%d，下次收获 %d天\n医院 Lv.%d：%s\n队伍攻击 +%d | 队伍生命 +%d" % [
+		int(growth["farm_level"]),
+		int(growth["farm_active_plots"]),
+		int(growth["farm_unlocked_plots"]),
+		int(growth["farm_next_harvest_days"]),
+		int(growth["clinic_level"]),
+		game_state.get_active_hospital_summary(),
+		int(growth["party_attack_bonus"]),
+		int(growth["party_max_hp_bonus"]),
+	]
 
 	for raw_project_id in project_buttons.keys():
 		var project_id := StringName(raw_project_id)
@@ -1385,10 +1649,36 @@ func refresh_expedition_prep() -> void:
 		prep_status_label.text = "补给已就绪：远征口粮 %d，药品 %d，料理：%s。" % [carried_food, carried_medicine, meal_text]
 	else:
 		prep_status_label.text = start_error
+	if readiness_label != null:
+		readiness_label.text = format_readiness_report(game_state.get_expedition_readiness_report(carried_food, carried_medicine, selected_meal_id))
+
+
+func format_readiness_report(report: Dictionary) -> String:
+	var lines := PackedStringArray()
+	var blocking: Array = report.get("blocking", [])
+	var warnings: Array = report.get("warnings", [])
+	lines.append("出发检查")
+	if not blocking.is_empty():
+		lines.append("暂时无法出发：")
+		for item in blocking:
+			lines.append("- %s" % String(item))
+	elif not warnings.is_empty():
+		lines.append("可以出发，但请注意：")
+		for item in warnings:
+			lines.append("- %s" % String(item))
+	else:
+		lines.append("补给和队伍状态良好。")
+	return "\n".join(lines)
+
 
 func refresh_daily_report(report: Dictionary) -> void:
 	if report.is_empty():
 		daily_report_label.text = "尚未推进时间。"
+		return
+
+	if report.has("daily_summary_lines"):
+		var summary_lines: Array = report.get("daily_summary_lines", [])
+		daily_report_label.text = "\n".join(PackedStringArray(summary_lines))
 		return
 
 	var lines := PackedStringArray()
@@ -1566,6 +1856,53 @@ func on_food_recipe_completed(_recipe_id: StringName, output_item_id: StringName
 func on_stackable_item_changed(_item_id: StringName, _new_count: int) -> void:
 	refresh_food_workshop_section()
 	refresh_expedition_prep()
+
+
+func on_hospital_data_changed() -> void:
+	refresh_hospital_section()
+	refresh_expedition_prep()
+	refresh_building_views()
+
+
+func on_hospital_project_started(project_type: StringName, target_character_id: StringName) -> void:
+	if hospital_feedback_label != null:
+		if project_type == &"craft_medicine":
+			hospital_feedback_label.text = "已开始制作基础药品。"
+		elif project_type == &"treat_character":
+			hospital_feedback_label.text = "已开始治疗：%s" % game_state.get_character_display_name(target_character_id)
+	refresh_hospital_section()
+	refresh_expedition_prep()
+	refresh_building_views()
+
+
+func on_medicine_production_completed(amount: int) -> void:
+	if hospital_feedback_label != null:
+		hospital_feedback_label.text = "基础药品制作完成，药品+%d。" % amount
+	refresh_hospital_section()
+	refresh_expedition_prep()
+	refresh_building_views()
+
+
+func on_character_treatment_started(character_id: StringName) -> void:
+	if hospital_feedback_label != null:
+		hospital_feedback_label.text = "%s正在医院接受治疗。" % game_state.get_character_display_name(character_id)
+	refresh_hospital_section()
+	refresh_expedition_prep()
+
+
+func on_character_treatment_completed(character_id: StringName) -> void:
+	if hospital_feedback_label != null:
+		hospital_feedback_label.text = "%s治疗完成，已恢复健康。" % game_state.get_character_display_name(character_id)
+	refresh_hospital_section()
+	refresh_expedition_prep()
+	refresh_building_views()
+
+
+func on_character_injury_changed(_character_id: StringName, _injury_state: StringName) -> void:
+	refresh_hospital_section()
+	refresh_expedition_prep()
+	if character_page != null and character_page.visible:
+		refresh_character_page()
 
 
 func on_building_state_changed(building_id: StringName) -> void:

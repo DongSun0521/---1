@@ -13,6 +13,12 @@ var status_label: Label
 var click_button: Button
 var highlight: PanelContainer
 var float_layer: Control
+var projectile_origin: Marker2D
+var body_center_anchor: Marker2D
+var ground_anchor: Marker2D
+var effect_anchor: Marker2D
+var damage_number_anchor: Marker2D
+var is_player_unit: bool = false
 
 
 func _ready() -> void:
@@ -21,6 +27,7 @@ func _ready() -> void:
 
 func setup(unit: Dictionary, frames: SpriteFrames, visual: Dictionary) -> void:
 	unit_id = unit.get("unit_id", &"")
+	is_player_unit = bool(unit.get("is_player_unit", false))
 	visual_data = visual.duplicate(true)
 	custom_minimum_size = visual.get("click_area", Vector2(180, 240))
 	size = custom_minimum_size
@@ -39,6 +46,13 @@ func setup(unit: Dictionary, frames: SpriteFrames, visual: Dictionary) -> void:
 
 
 func build_nodes() -> void:
+	body_center_anchor = create_anchor("BodyCenterAnchor", size * 0.5)
+	ground_anchor = create_anchor("GroundAnchor", Vector2(size.x * 0.5, size.y - 42.0))
+	effect_anchor = create_anchor("EffectAnchor", size * 0.5)
+	damage_number_anchor = create_anchor("DamageNumberAnchor", Vector2(size.x * 0.5, -54.0))
+	var projectile_x := size.x * (0.78 if is_player_unit else 0.22)
+	projectile_origin = create_anchor("ProjectileOrigin", Vector2(projectile_x, size.y * 0.46))
+
 	var shadow := PanelContainer.new()
 	shadow.name = "Shadow"
 	shadow.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -106,7 +120,12 @@ func update_state(unit: Dictionary, play_death: bool = true) -> void:
 	hp_bar.max_value = max_hp
 	hp_bar.value = current_hp
 	hp_label.text = "%d/%d" % [current_hp, max_hp]
-	status_label.text = "防御" if bool(unit.get("is_defending", false)) and current_hp > 0 else ""
+	var status_parts := PackedStringArray()
+	if bool(unit.get("is_defending", false)) and current_hp > 0:
+		status_parts.append("防御")
+	if StringName(unit.get("injury_state", &"healthy")) == &"injured" and current_hp > 0:
+		status_parts.append("受伤")
+	status_label.text = " / ".join(status_parts)
 	click_button.disabled = current_hp <= 0
 	modulate = Color(0.68, 0.68, 0.68, 1.0) if current_hp <= 0 else Color.WHITE
 	if current_hp <= 0 and play_death:
@@ -154,13 +173,44 @@ func play_hit_or_death(is_defeated: bool) -> void:
 
 func show_float_text(text: String, color: Color) -> void:
 	var label := create_label(text, 24, color, HORIZONTAL_ALIGNMENT_CENTER)
-	label.position = Vector2(0, -72)
+	label.position = damage_number_anchor.position - Vector2(size.x * 0.5, 18)
 	label.size = Vector2(size.x, 34)
 	float_layer.add_child(label)
 	var tween := create_tween()
 	tween.tween_property(label, "position", label.position + Vector2(0, -54), 0.55)
 	tween.parallel().tween_property(label, "modulate:a", 0.0, 0.55)
 	tween.tween_callback(label.queue_free)
+
+
+func animate_hp_to(value: int, duration: float = 0.22) -> void:
+	var clamped_value := clampi(value, 0, int(hp_bar.max_value))
+	var tween := create_tween()
+	tween.tween_property(hp_bar, "value", clamped_value, duration)
+	hp_label.text = "%d/%d" % [clamped_value, int(hp_bar.max_value)]
+
+
+func get_effect_anchor_global_position(anchor_id: StringName) -> Vector2:
+	var anchor: Marker2D = body_center_anchor
+	match anchor_id:
+		&"weapon", &"projectile":
+			anchor = projectile_origin
+		&"ground":
+			anchor = ground_anchor
+		&"effect":
+			anchor = effect_anchor
+		&"damage_number":
+			anchor = damage_number_anchor
+	if anchor == null:
+		return global_position + size * 0.5
+	return anchor.global_position
+
+
+func create_anchor(anchor_name: String, anchor_position: Vector2) -> Marker2D:
+	var anchor := Marker2D.new()
+	anchor.name = anchor_name
+	anchor.position = anchor_position
+	add_child(anchor)
+	return anchor
 
 
 func create_label(text: String, font_size: int, color: Color, alignment: HorizontalAlignment) -> Label:
