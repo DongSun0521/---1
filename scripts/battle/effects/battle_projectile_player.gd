@@ -47,8 +47,16 @@ func launch_projectile(projectile_id: StringName, source_view, target_view, over
 	if travel_duration <= 0.0:
 		travel_duration = data.travel_duration
 	tween.tween_property(projectile, "position", local_target, travel_duration).set_trans(Tween.TRANS_LINEAR)
-	await tween.finished
-	if handle.is_completed:
+	# A battle/scene cleanup can release the projectile before Tween.finished is
+	# emitted. Polling the bound node and handle lets the presentation coroutine
+	# leave safely instead of waiting forever on a cancelled tween.
+	while is_inside_tree() and is_instance_valid(projectile) and not handle.is_completed:
+		await get_tree().process_frame
+		if not is_inside_tree() or handle.is_completed or not is_instance_valid(projectile):
+			return false
+		if not tween.is_running():
+			break
+	if not is_inside_tree() or handle.is_completed or not is_instance_valid(projectile):
 		return false
 	effect_player.stop_effect(handle)
 	var impact_effect_id := StringName(overrides.get("impact_effect_id", data.impact_effect_id))

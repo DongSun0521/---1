@@ -53,6 +53,8 @@ func _ready() -> void:
 	skill_button.pressed.connect(select_skill)
 	defend_button.pressed.connect(use_defend)
 	medicine_button.pressed.connect(select_medicine)
+	for button in [attack_button, skill_button, defend_button, medicine_button]:
+		button.pressed.connect(effect_player.play_sfx.bind(&"ui_click"))
 	battlefield.resized.connect(refresh)
 	refresh()
 
@@ -393,11 +395,15 @@ func play_presentation_event(event: Dictionary) -> void:
 	var action_type: StringName = event.get("action_type", &"")
 
 	if action_type == &"defend":
-		await present_defend_visual(event, effect_registry.get_action_visual(&"defend"), source_view)
+		var defend_profile := effect_registry.get_action_visual(&"defend")
+		effect_player.play_profile_release_audio(defend_profile)
+		await present_defend_visual(event, defend_profile, source_view)
 		return
 
 	if action_type == &"medicine":
-		await present_profile_visual(event, effect_registry.get_action_visual(&"medicine"), source_view)
+		var medicine_profile := effect_registry.get_action_visual(&"medicine")
+		effect_player.play_profile_release_audio(medicine_profile)
+		await present_profile_visual(event, medicine_profile, source_view)
 		return
 
 	var visual_action_id := resolve_visual_action_id(event)
@@ -408,6 +414,7 @@ func play_presentation_event(event: Dictionary) -> void:
 	if source_view != null and not profile.skip_source_animation:
 		var release_frame: int = profile.release_frame if profile.release_frame >= 0 else int(round(get_impact_time(source_id) * 10.0))
 		await source_view.play_animation_until_frame(profile.source_animation_name, release_frame, profile.source_animation_speed_scale)
+	effect_player.play_profile_release_audio(profile)
 	await present_profile_visual(event, profile, source_view)
 	if not is_inside_tree():
 		return
@@ -417,7 +424,7 @@ func play_presentation_event(event: Dictionary) -> void:
 
 func present_profile_visual(event: Dictionary, profile: BattleActionVisualProfile, source_view) -> void:
 	if profile == null:
-		play_target_feedback(event)
+		play_target_feedback(event, profile)
 		await get_tree().create_timer(0.35).timeout
 		return
 	var target_views := get_event_target_views(event)
@@ -443,7 +450,8 @@ func present_profile_visual(event: Dictionary, profile: BattleActionVisualProfil
 			"effect_speed_scale": profile.effect_speed_scale,
 			"impact_effect_id": resolved_impact_effect_id,
 		})
-		play_target_feedback(event)
+		await effect_player.play_profile_impact_feedback(profile)
+		play_target_feedback(event, profile)
 		var projectile_feedback_started := Time.get_ticks_msec()
 		var projectile_handles: Array = []
 		if projectile_player.last_impact_handle != null and not projectile_player.last_impact_handle.is_completed:
@@ -465,8 +473,9 @@ func present_profile_visual(event: Dictionary, profile: BattleActionVisualProfil
 	var impact_delay := get_profile_impact_delay(profile, impact_effect_id)
 	if impact_delay > 0.0:
 		await get_tree().create_timer(impact_delay).timeout
+	await effect_player.play_profile_impact_feedback(profile)
 	play_profile_recoil(profile, source_view, target_views)
-	play_target_feedback(event)
+	play_target_feedback(event, profile)
 	var feedback_started := Time.get_ticks_msec()
 	await wait_for_target_feedback(event, impact_handles, feedback_started)
 
@@ -481,7 +490,7 @@ func present_legacy_visual(event: Dictionary, source_view, source_id: StringName
 		source_view.play_idle()
 
 
-func play_target_feedback(event: Dictionary) -> void:
+func play_target_feedback(event: Dictionary, profile: BattleActionVisualProfile = null) -> void:
 	var target_ids: Array = event.get("target_ids", [])
 	var damage_values: Array = event.get("damage_values", [])
 	var healing_values: Array = event.get("healing_values", [])
@@ -499,7 +508,9 @@ func play_target_feedback(event: Dictionary) -> void:
 		if index < damage_values.size():
 			var damage := int(damage_values[index])
 			target_view.show_float_text("-%d" % damage, Color(1.0, 0.34, 0.26))
-			target_view.play_hit_or_death(defeated_ids.has(target_id))
+			var is_defeated := defeated_ids.has(target_id)
+			effect_player.play_unit_feedback(is_defeated, profile)
+			target_view.start_hit_or_death_visual(is_defeated)
 		elif index < healing_values.size():
 			var healing := int(healing_values[index])
 			target_view.show_float_text("+%d" % healing, Color(0.36, 1.0, 0.50))
@@ -521,6 +532,12 @@ func resolve_visual_action_id(event: Dictionary) -> StringName:
 	if action_type == &"attack":
 		if bool(source.get("is_player_unit", false)):
 			return StringName("%s_basic_attack" % source_id)
+		if String(source_id).begins_with("forest_slime"):
+			return &"monster_basic_attack"
+		if source_id == &"ruins_guard":
+			return &"ruins_guard_basic_attack"
+		if String(source_id).contains("fire") or String(source.get("battle_visual_id", &"")).contains("fire"):
+			return &"fire_boss_basic_attack"
 		return &"enemy_basic_attack"
 	return action_type
 
@@ -569,14 +586,14 @@ func play_profile_recoil(profile: BattleActionVisualProfile, source_view, target
 		target_view.play_visual_recoil(direction * profile.target_recoil_distance)
 
 
-func present_defend_visual(event: Dictionary, _profile: BattleActionVisualProfile, source_view) -> void:
+func present_defend_visual(event: Dictionary, profile: BattleActionVisualProfile, source_view) -> void:
 	if source_view != null:
 		var source_state := get_unit_by_id(StringName(event.get("source_id", &"")))
 		if not source_state.is_empty():
 			source_view.update_state(source_state, false)
 		source_view.play_defend_visual()
 	await get_tree().create_timer(0.12).timeout
-	play_target_feedback(event)
+	play_target_feedback(event, profile)
 	await get_tree().create_timer(0.24).timeout
 
 
@@ -634,8 +651,10 @@ func show_pending_result() -> void:
 	var result: Dictionary = game_state.pending_battle_result
 	result_overlay.visible = true
 	if String(result.get("outcome", "")) == "victory":
+		effect_player.play_sfx(&"battle_victory")
 		result_label.text = "战斗胜利"
 	else:
+		effect_player.play_sfx(&"battle_defeat")
 		result_label.text = "远征失败"
 
 

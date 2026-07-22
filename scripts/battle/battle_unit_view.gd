@@ -168,8 +168,13 @@ func play_once(animation: StringName) -> void:
 		return
 	sprite.speed_scale = 1.0
 	sprite.play(animation)
-	if not sprite.sprite_frames.get_animation_loop(animation):
-		await sprite.animation_finished
+	if sprite.sprite_frames.get_animation_loop(animation):
+		return
+	# Scene cleanup can free the sprite before animation_finished is emitted.
+	# Polling keeps hit/death coroutines cancellable without retaining old views.
+	var last_frame := maxi(0, sprite.sprite_frames.get_frame_count(animation) - 1)
+	while is_inside_tree() and sprite.animation == animation and sprite.frame < last_frame and sprite.is_playing():
+		await get_tree().process_frame
 
 
 func play_animation_until_frame(animation: StringName, release_frame: int, speed_scale: float = 1.0) -> void:
@@ -182,21 +187,57 @@ func play_animation_until_frame(animation: StringName, release_frame: int, speed
 	sprite.speed_scale = maxf(0.01, speed_scale)
 	sprite.play(animation)
 	while is_inside_tree() and sprite.animation == animation and sprite.frame < target_frame and sprite.is_playing():
-		await sprite.frame_changed
+		await get_tree().process_frame
 
 
 func play_hit_or_death(is_defeated: bool) -> void:
 	if is_defeated:
 		await play_once(&"death")
 	else:
+		play_hit_flash()
+		play_visual_recoil(Vector2(4.0, 0.0))
 		await play_once(&"hit")
 		play_idle()
+
+
+func start_hit_or_death_visual(is_defeated: bool) -> void:
+	# BattleView starts feedback without awaiting it.  Keep that path free of
+	# coroutine states so an interrupted battle cannot retain an old unit view.
+	if is_defeated:
+		play_death_hold()
+		return
+	play_hit_flash()
+	play_visual_recoil(Vector2(4.0, 0.0))
+	if sprite.sprite_frames == null or not sprite.sprite_frames.has_animation(&"hit"):
+		return
+	sprite.speed_scale = 1.0
+	sprite.play(&"hit")
+	var timer := Timer.new()
+	timer.one_shot = true
+	timer.process_callback = Timer.TIMER_PROCESS_IDLE
+	timer.process_mode = Node.PROCESS_MODE_ALWAYS
+	presentation_nodes.append(timer)
+	add_child(timer)
+	var frame_count := sprite.sprite_frames.get_frame_count(&"hit")
+	var fps := maxf(1.0, sprite.sprite_frames.get_animation_speed(&"hit"))
+	timer.timeout.connect(finish_started_hit_visual.bind(timer), CONNECT_ONE_SHOT)
+	timer.start(maxf(0.05, float(frame_count) / fps))
+
+
+func finish_started_hit_visual(timer: Timer) -> void:
+	presentation_nodes.erase(timer)
+	if sprite != null and sprite.animation == &"hit":
+		play_idle()
+	if is_instance_valid(timer):
+		timer.queue_free()
 
 
 func show_float_text(text: String, color: Color) -> void:
 	var label := create_label(text, 24, color, HORIZONTAL_ALIGNMENT_CENTER)
 	presentation_nodes.append(label)
 	label.size = Vector2(size.x, 34)
+	label.pivot_offset = label.size * 0.5
+	label.scale = Vector2(0.88, 0.88)
 	if global_float_layer != null and is_instance_valid(global_float_layer):
 		global_float_layer.add_child(label)
 		label.position = damage_number_anchor.global_position - global_float_layer.global_position - Vector2(size.x * 0.5, 18)
@@ -205,8 +246,13 @@ func show_float_text(text: String, color: Color) -> void:
 		label.position = damage_number_anchor.position - Vector2(size.x * 0.5, 18)
 	var tween := create_tween()
 	track_presentation_tween(tween)
-	tween.tween_property(label, "position", label.position + Vector2(0, -54), 0.55)
-	tween.parallel().tween_property(label, "modulate:a", 0.0, 0.55)
+	var start_position := label.position
+	tween.tween_property(label, "scale", Vector2(1.08, 1.08), 0.10).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tween.parallel().tween_property(label, "position", start_position + Vector2(0, -16), 0.10)
+	tween.tween_property(label, "scale", Vector2.ONE, 0.12)
+	tween.parallel().tween_property(label, "position", start_position + Vector2(0, -28), 0.12)
+	tween.tween_property(label, "position", start_position + Vector2(0, -54), 0.33)
+	tween.parallel().tween_property(label, "modulate:a", 0.0, 0.33)
 	tween.tween_callback(free_presentation_node.bind(label))
 
 
@@ -247,6 +293,15 @@ func play_visual_recoil(offset: Vector2) -> void:
 	track_presentation_tween(tween)
 	tween.tween_property(sprite, "position", base_position + offset, 0.07).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tween.tween_property(sprite, "position", base_position, 0.13).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+func play_hit_flash() -> void:
+	if sprite == null:
+		return
+	sprite.modulate = Color(1.55, 1.55, 1.55, 1.0)
+	var tween := create_tween()
+	track_presentation_tween(tween)
+	tween.tween_property(sprite, "modulate", Color.WHITE, 0.12).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
 
 func clear_presentation_visuals() -> void:

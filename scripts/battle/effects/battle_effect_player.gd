@@ -20,6 +20,10 @@ func setup(effect_registry: BattleEffectRegistry, effect_layers: Dictionary) -> 
 	registry = effect_registry
 	layers = effect_layers.duplicate()
 	checkerboard_material = create_checkerboard_material()
+	audio_player.setup(self)
+	var ground_layer: Control = layers.get(&"ground", null)
+	var world_layer: Control = ground_layer.get_parent() as Control if ground_layer != null else null
+	camera_effects.setup(self, world_layer, layers.get(&"overlay", null))
 
 
 func play_effect(effect_id: StringName, context: BattleEffectContext = null) -> BattleEffectHandle:
@@ -78,6 +82,42 @@ func clear_all_effects() -> void:
 			instance.queue_free()
 		handle.finish()
 	active_handles.clear()
+	audio_player.stop_all_battle_audio()
+	camera_effects.clear_all()
+
+
+func play_sfx(sound_id: StringName) -> void:
+	audio_player.play_sfx(sound_id)
+
+
+func play_profile_release_audio(profile: BattleActionVisualProfile) -> void:
+	if profile == null:
+		return
+	var sound_id := profile.heal_sound_id
+	if sound_id == &"":
+		sound_id = profile.projectile_sound_id
+	if sound_id == &"":
+		sound_id = profile.cast_sound_id
+	audio_player.play_sfx(sound_id)
+
+
+func play_profile_impact_feedback(profile: BattleActionVisualProfile) -> void:
+	if profile == null:
+		return
+	audio_player.play_sfx(profile.impact_sound_id)
+	camera_effects.play_shake(profile.camera_shake_id)
+	camera_effects.play_screen_flash(profile.screen_flash_id)
+	var hit_stop_handle := camera_effects.play_hit_stop(profile.hit_stop_duration)
+	if hit_stop_handle != null and not hit_stop_handle.is_completed:
+		await hit_stop_handle.completed
+
+
+func play_unit_feedback(is_defeated: bool, profile: BattleActionVisualProfile = null) -> void:
+	if is_defeated:
+		var death_sound_id := profile.death_sound_id if profile != null else &"unit_death"
+		audio_player.play_sfx(death_sound_id)
+	else:
+		audio_player.play_sfx(&"unit_hit")
 
 
 func get_active_effect_count() -> int:

@@ -79,9 +79,9 @@ func assert_sprite_frames() -> void:
 func assert_registry(registry) -> void:
 	for effect_id: StringName in [&"arrow", &"magic_bolt", &"hit_spark", &"arcane_burst", &"heal_circle", &"warning_circle", &"earth_spike"]:
 		assert(registry.get_effect(effect_id) != null)
-	for projectile_id: StringName in [&"arrow_projectile", &"magic_bolt_projectile"]:
+	for projectile_id: StringName in [&"arrow_projectile", &"magic_bolt_projectile", &"monster_magic_bolt_projectile"]:
 		assert(registry.get_projectile(projectile_id) != null)
-	for action_id: StringName in [&"guard_basic_attack", &"shield_bash", &"defend", &"hunter_basic_attack", &"power_shot", &"mage_basic_attack", &"arcane_blast", &"doctor_basic_attack", &"healing_art", &"medicine", &"ruins_guard_earth_spike"]:
+	for action_id: StringName in [&"guard_basic_attack", &"shield_bash", &"defend", &"hunter_basic_attack", &"power_shot", &"mage_basic_attack", &"arcane_blast", &"doctor_basic_attack", &"healing_art", &"medicine", &"monster_basic_attack", &"ruins_guard_basic_attack", &"ruins_guard_earth_spike", &"fire_boss_basic_attack"]:
 		assert(registry.get_action_visual(action_id) != null)
 
 

@@ -16,7 +16,7 @@ const VISUALS := {
 		"projectile_origin_offset": Vector2(10, -28),
 		"body_center_offset": Vector2(8, -20),
 		"ground_anchor_offset": Vector2(0, 10),
-		"effect_anchor_offset": Vector2(8, -20),
+		"effect_anchor_offset": Vector2(0, -20),
 		"damage_number_offset": Vector2(0, 0),
 	},
 	&"hunter": {
@@ -30,7 +30,7 @@ const VISUALS := {
 		"projectile_origin_offset": Vector2(20, -32),
 		"body_center_offset": Vector2(8, -18),
 		"ground_anchor_offset": Vector2(0, 8),
-		"effect_anchor_offset": Vector2(8, -18),
+		"effect_anchor_offset": Vector2(0, -18),
 		"damage_number_offset": Vector2(0, 0),
 	},
 	&"mage": {
@@ -44,7 +44,7 @@ const VISUALS := {
 		"projectile_origin_offset": Vector2(14, -42),
 		"body_center_offset": Vector2(8, -22),
 		"ground_anchor_offset": Vector2(0, 8),
-		"effect_anchor_offset": Vector2(8, -22),
+		"effect_anchor_offset": Vector2(0, -22),
 		"damage_number_offset": Vector2(0, 0),
 	},
 	&"doctor": {
@@ -58,7 +58,7 @@ const VISUALS := {
 		"projectile_origin_offset": Vector2(10, -36),
 		"body_center_offset": Vector2(8, -18),
 		"ground_anchor_offset": Vector2(0, 8),
-		"effect_anchor_offset": Vector2(8, -18),
+		"effect_anchor_offset": Vector2(0, -18),
 		"damage_number_offset": Vector2(0, 0),
 	},
 	&"forest_slime": {
@@ -69,6 +69,12 @@ const VISUALS := {
 		"click_area": Vector2(160, 140),
 		"hp_offset": Vector2(0, -112),
 		"impact_frame": 4,
+		# The attack bubble leaves the slime's mouth on the player-facing side.
+		"projectile_origin_offset": Vector2(-16, 8),
+		"body_center_offset": Vector2(-16, 0),
+		"ground_anchor_offset": Vector2(0, 48),
+		"effect_anchor_offset": Vector2(-16, 0),
+		"damage_number_offset": Vector2(0, 0),
 	},
 	&"ruins_guard": {
 		"frames": "res://assets/art/boss/sprite_frames/ShuJing_frames.tres",
@@ -78,6 +84,11 @@ const VISUALS := {
 		"click_area": Vector2(270, 330),
 		"hp_offset": Vector2(0, -250),
 		"impact_frame": 4,
+		"projectile_origin_offset": Vector2(-10, -20),
+		"body_center_offset": Vector2(0, -20),
+		"ground_anchor_offset": Vector2(0, 0),
+		"effect_anchor_offset": Vector2(0, -20),
+		"damage_number_offset": Vector2(0, 0),
 	},
 	&"fire_boss": {
 		"frames": "res://assets/art/boss/sprite_frames/HuoYuanSu_frames.tres",
@@ -87,6 +98,11 @@ const VISUALS := {
 		"click_area": Vector2(270, 330),
 		"hp_offset": Vector2(0, -248),
 		"impact_frame": 4,
+		"projectile_origin_offset": Vector2(-10, -18),
+		"body_center_offset": Vector2(0, -18),
+		"ground_anchor_offset": Vector2(0, 0),
+		"effect_anchor_offset": Vector2(0, -18),
+		"damage_number_offset": Vector2(0, 0),
 	},
 }
 

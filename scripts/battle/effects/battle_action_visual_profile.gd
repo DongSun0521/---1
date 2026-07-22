@@ -36,7 +36,10 @@ enum ImpactTiming {
 @export var projectile_override_id: StringName = &""
 @export var impact_effect_override_id: StringName = &""
 @export var cast_sound_id: StringName = &""
+@export var projectile_sound_id: StringName = &""
 @export var impact_sound_id: StringName = &""
+@export var heal_sound_id: StringName = &""
+@export var death_sound_id: StringName = &"unit_death"
 @export var camera_shake_id: StringName = &""
 @export var screen_flash_id: StringName = &""
 @export var hit_stop_duration: float = 0.0

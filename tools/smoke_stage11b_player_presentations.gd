@@ -129,13 +129,13 @@ func check_layers_and_scaling(battle_view) -> void:
 	var doctor = battle_view.unit_views[&"doctor"]
 	var context := EffectContextScript.new()
 	context.target_view = doctor
-	context.anchor_override = &"ground"
+	context.anchor_override = &"effect"
 	context.duration_override = 0.02
 	context.scale_multiplier = Vector2(0.78, 0.78)
 	context.speed_scale = 1.35
 	var heal_handle = battle_view.effect_player.play_effect(&"heal_circle", context)
-	require_true(heal_handle.node.get_parent() == battle_view.ground_effect_layer, "heal circle must use ground layer")
-	require_true(heal_handle.node.global_position.distance_to(doctor.get_effect_anchor_global_position(&"ground")) < 0.5, "heal circle is not aligned to ground anchor")
+	require_true(heal_handle.node.get_parent() == battle_view.impact_effect_layer, "heal circle must use impact layer")
+	require_true(heal_handle.node.global_position.distance_to(doctor.get_effect_anchor_global_position(&"effect")) < 0.5, "heal circle is not aligned to character effect anchor")
 	require_true(heal_handle.node.scale.is_equal_approx(battle_view.effect_registry.get_effect(&"heal_circle").display_scale * Vector2(0.78, 0.78)), "heal circle scale override was not applied")
 	battle_view.effect_player.stop_effect(heal_handle)
 	var enemy = battle_view.unit_views[&"forest_slime_01"]

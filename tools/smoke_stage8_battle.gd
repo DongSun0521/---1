@@ -16,6 +16,9 @@ func run() -> void:
 	game_state.start_new_game()
 	await run_encounter_smoke(battle_view, &"ruins_guard")
 
+	battle_view.queue_free()
+	await process_frame
+	await process_frame
 	print("stage8 battle smoke ok")
 	quit()
 
@@ -40,4 +43,7 @@ func run_encounter_smoke(battle_view: Node, encounter_id: StringName) -> void:
 
 	if bool(active_unit.get("is_player_unit", false)):
 		battle_view.start_action(&"basic_attack", enemies[0]["unit_id"])
-		await create_timer(1.4).timeout
+		var deadline_msec := Time.get_ticks_msec() + 5000
+		while battle_view.presentation_in_progress and Time.get_ticks_msec() < deadline_msec:
+			await process_frame
+		await create_timer(0.25).timeout
