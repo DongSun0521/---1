@@ -4,6 +4,7 @@ const VILLAGE_BACKGROUND_PATH := "res://assets/art/village/village_main.png"
 const FOREST_RACE_ART_PATH := "res://assets/art/characters/forest_race_sheet.png"
 const BattleVisualRegistryScript := preload("res://scripts/data/battle_visual_registry.gd")
 const VillageBuildingViewScript := preload("res://features/village/village_building_view.gd")
+const COMBAT_PAGE_CHARACTER_IDS: Array[StringName] = [&"guard", &"hunter", &"mage", &"doctor"]
 
 var game_state
 var visual_registry: RefCounted = BattleVisualRegistryScript.new()
@@ -36,13 +37,18 @@ var start_expedition_button: Button
 var advance_day_button: Button
 var character_page: PanelContainer
 var character_buttons: Dictionary = {}
+var character_selector_box: HBoxContainer
 var character_art_area: Control
 var character_sprite: AnimatedSprite2D
 var character_basic_label: Label
 var character_combat_label: Label
-var character_life_label: Label
+var character_skill_label: Label
 var character_trait_label: Label
 var character_equipment_label: Label
+var character_party_label: Label
+var character_party_toggle_button: Button
+var character_party_up_button: Button
+var character_party_down_button: Button
 var equipment_list_box: VBoxContainer
 var equipment_status_label: Label
 var equipment_action_hint_label: Label
@@ -109,6 +115,7 @@ func _ready() -> void:
 	game_state.daily_report_generated.connect(refresh_daily_report)
 	game_state.character_runtime_state_changed.connect(on_character_data_changed)
 	game_state.character_final_stats_changed.connect(on_character_data_changed)
+	game_state.character_roster_changed.connect(on_character_roster_changed)
 	game_state.equipment_inventory_changed.connect(on_equipment_data_changed)
 	game_state.character_equipment_changed.connect(on_character_data_changed)
 	game_state.forge_state_changed.connect(on_forge_data_changed)
@@ -142,6 +149,8 @@ func _exit_tree() -> void:
 		game_state.character_runtime_state_changed.disconnect(on_character_data_changed)
 	if game_state != null and game_state.character_final_stats_changed.is_connected(on_character_data_changed):
 		game_state.character_final_stats_changed.disconnect(on_character_data_changed)
+	if game_state != null and game_state.character_roster_changed.is_connected(on_character_roster_changed):
+		game_state.character_roster_changed.disconnect(on_character_roster_changed)
 	if game_state != null and game_state.equipment_inventory_changed.is_connected(on_equipment_data_changed):
 		game_state.equipment_inventory_changed.disconnect(on_equipment_data_changed)
 	if game_state != null and game_state.character_equipment_changed.is_connected(on_character_data_changed):
@@ -197,7 +206,7 @@ func build_visual_layout() -> void:
 
 	build_building_views()
 	add_hotspot(&"prep", "开始远征", Rect2(0.78, 0.05, 0.18, 0.10))
-	add_hotspot(&"codex", "角色详情", Rect2(0.03, 0.32, 0.16, 0.10))
+	add_hotspot(&"codex", "战斗角色", Rect2(0.03, 0.32, 0.16, 0.10))
 
 	build_overview_panel()
 	build_detail_panel()
@@ -568,7 +577,7 @@ func build_character_page() -> void:
 	header.add_theme_constant_override("separation", 12)
 	root_box.add_child(header)
 
-	var title := create_label("角色详情", 32, Color(1.0, 0.92, 0.66), HORIZONTAL_ALIGNMENT_LEFT)
+	var title := create_label("战斗角色", 32, Color(1.0, 0.92, 0.66), HORIZONTAL_ALIGNMENT_LEFT)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
 
@@ -579,19 +588,11 @@ func build_character_page() -> void:
 	close_button.pressed.connect(hide_character_page)
 	header.add_child(close_button)
 
-	var selector := HBoxContainer.new()
-	selector.add_theme_constant_override("separation", 10)
-	root_box.add_child(selector)
-	for character_id: StringName in game_state.get_character_ids():
-		var definition: Dictionary = game_state.get_character_definition(character_id)
-		var button := Button.new()
-		button.text = String(definition.get("display_name", character_id))
-		button.custom_minimum_size = Vector2(150, 46)
-		button.clip_text = true
-		apply_button_style(button, false)
-		button.pressed.connect(select_character.bind(character_id))
-		selector.add_child(button)
-		character_buttons[character_id] = button
+	character_selector_box = HBoxContainer.new()
+	character_selector_box.name = "CombatCharacterList"
+	character_selector_box.add_theme_constant_override("separation", 10)
+	root_box.add_child(character_selector_box)
+	rebuild_character_buttons()
 
 	var body := HBoxContainer.new()
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -629,9 +630,41 @@ func build_character_page() -> void:
 	info.add_theme_constant_override("separation", 12)
 	info_scroll.add_child(info)
 
+	var party_panel := create_panel("PartyFormationPanel", 0.78)
+	party_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	info.add_child(party_panel)
+	var party_margin := create_margin(12)
+	party_panel.add_child(party_margin)
+	var party_box := VBoxContainer.new()
+	party_box.add_theme_constant_override("separation", 6)
+	party_margin.add_child(party_box)
+	party_box.add_child(create_label("队伍编成", 22, Color(1.0, 0.86, 0.48), HORIZONTAL_ALIGNMENT_LEFT))
+	character_party_label = create_label("", 17, Color(0.94, 0.94, 0.86), HORIZONTAL_ALIGNMENT_LEFT)
+	party_box.add_child(character_party_label)
+	var party_actions := HBoxContainer.new()
+	party_actions.add_theme_constant_override("separation", 8)
+	party_box.add_child(party_actions)
+	character_party_toggle_button = Button.new()
+	character_party_toggle_button.custom_minimum_size = Vector2(112, 40)
+	apply_button_style(character_party_toggle_button, true)
+	character_party_toggle_button.pressed.connect(toggle_selected_character_party)
+	party_actions.add_child(character_party_toggle_button)
+	character_party_up_button = Button.new()
+	character_party_up_button.text = "前移"
+	character_party_up_button.custom_minimum_size = Vector2(88, 40)
+	apply_button_style(character_party_up_button, false)
+	character_party_up_button.pressed.connect(move_selected_character_in_party.bind(-1))
+	party_actions.add_child(character_party_up_button)
+	character_party_down_button = Button.new()
+	character_party_down_button.text = "后移"
+	character_party_down_button.custom_minimum_size = Vector2(88, 40)
+	apply_button_style(character_party_down_button, false)
+	character_party_down_button.pressed.connect(move_selected_character_in_party.bind(1))
+	party_actions.add_child(character_party_down_button)
+
 	character_basic_label = add_character_section(info, "基础信息")
 	character_combat_label = add_character_section(info, "战斗属性")
-	character_life_label = add_character_section(info, "生活属性")
+	character_skill_label = add_character_section(info, "技能")
 	character_trait_label = add_character_section(info, "特性")
 	character_equipment_label = add_character_section(info, "装备")
 
@@ -993,6 +1026,7 @@ func hide_detail_panel() -> void:
 
 func show_character_page() -> void:
 	character_page.visible = true
+	rebuild_character_buttons()
 	select_preferred_equipment_for_character(selected_character_id)
 	refresh_character_page()
 
@@ -1459,8 +1493,10 @@ func refresh_hospital_section() -> void:
 
 	for child: Node in hospital_character_list_box.get_children():
 		child.queue_free()
-	for character_id: StringName in game_state.get_character_ids():
-		hospital_character_list_box.add_child(create_hospital_character_card(character_id))
+	for snapshot: Dictionary in game_state.get_all_combat_characters():
+		var character_id := StringName(snapshot.get("character_id", &""))
+		if character_id != &"":
+			hospital_character_list_box.add_child(create_hospital_character_card(character_id))
 
 
 func create_hospital_medicine_card(recipe: Dictionary) -> Control:
@@ -1819,6 +1855,13 @@ func select_character(character_id: StringName) -> void:
 
 func on_character_data_changed(_character_id: StringName) -> void:
 	if character_page != null and character_page.visible:
+		rebuild_character_buttons()
+		refresh_character_page()
+
+
+func on_character_roster_changed() -> void:
+	if character_page != null and character_page.visible:
+		rebuild_character_buttons()
 		refresh_character_page()
 
 
@@ -2204,9 +2247,61 @@ func unequip_character_slot(slot_type: StringName) -> void:
 	refresh_character_page()
 
 
+func rebuild_character_buttons() -> void:
+	if character_selector_box == null:
+		return
+	for child: Node in character_selector_box.get_children():
+		child.queue_free()
+	character_buttons.clear()
+	for snapshot: Dictionary in game_state.get_all_combat_characters():
+		var character_id := StringName(snapshot.get("character_id", &""))
+		if not COMBAT_PAGE_CHARACTER_IDS.has(character_id):
+			continue
+		var combat_data: Dictionary = snapshot.get("combat_data", {})
+		var profession_id := StringName(combat_data.get("profession_id", &""))
+		var final_stats: Dictionary = game_state.get_final_combat_stats(character_id)
+		var party_text := "出战·%d位" % (int(combat_data.get("party_slot", -1)) + 1) if bool(combat_data.get("is_in_party", false)) else "待命"
+		var injury_text := "受伤" if StringName(combat_data.get("injury_state", &"healthy")) == &"injured" else "健康"
+		var button := Button.new()
+		button.name = "%sCharacterButton" % String(character_id).capitalize()
+		button.text = "%s｜%s｜Lv.%d\n生命 %d/%d｜%s｜%s" % [
+			String(snapshot.get("display_name", character_id)),
+			game_state.get_profession_display_name(profession_id),
+			int(snapshot.get("level", 1)),
+			int(combat_data.get("current_hp", 0)),
+			int(final_stats.get("max_hp", 1)),
+			party_text,
+			injury_text,
+		]
+		button.custom_minimum_size = Vector2(225, 70)
+		button.clip_text = true
+		apply_button_style(button, false)
+		button.pressed.connect(select_character.bind(character_id))
+		character_selector_box.add_child(button)
+		character_buttons[character_id] = button
+
+
+func toggle_selected_character_party() -> void:
+	var snapshot: Dictionary = game_state.get_roster_character(selected_character_id)
+	var combat_data: Dictionary = snapshot.get("combat_data", {})
+	if combat_data.is_empty():
+		return
+	game_state.set_character_party_status(selected_character_id, not bool(combat_data.get("is_in_party", false)))
+
+
+func move_selected_character_in_party(direction: int) -> void:
+	var party_ids: Array[StringName] = game_state.get_character_ids()
+	var current_slot := party_ids.find(selected_character_id)
+	if current_slot < 0:
+		return
+	game_state.move_party_character(selected_character_id, current_slot + direction)
+
+
 func refresh_character_page() -> void:
 	if character_basic_label == null:
 		return
+	if not COMBAT_PAGE_CHARACTER_IDS.has(selected_character_id) or game_state.get_roster_character(selected_character_id).is_empty():
+		selected_character_id = COMBAT_PAGE_CHARACTER_IDS[0]
 	var detail: Dictionary = game_state.get_character_detail(selected_character_id)
 	if detail.is_empty():
 		return
@@ -2217,14 +2312,23 @@ func refresh_character_page() -> void:
 
 	var definition: Dictionary = detail.get("definition", {})
 	var runtime_state: Dictionary = detail.get("runtime_state", {})
+	var roster_record: Dictionary = detail.get("roster_record", {})
+	var combat_data: Dictionary = roster_record.get("combat_data", {})
 	var skills: Array = detail.get("skills", [])
-	var skill: Dictionary = skills[0] if not skills.is_empty() else {}
-	character_basic_label.text = "%s\n职业：%s\n当前生命：%d/%d\n技能：%s\n\n%s" % [
+	var is_in_party := bool(combat_data.get("is_in_party", false))
+	var party_slot := int(combat_data.get("party_slot", -1))
+	var party_position := "第%d位" % (party_slot + 1) if is_in_party else "待命"
+	var injury_text := "受伤" if StringName(combat_data.get("injury_state", &"healthy")) == &"injured" else "健康"
+	character_basic_label.text = "%s\n职业：%s\n等级：Lv.%d\n经验：%d / %d\n当前生命：%d/%d\n伤势：%s\n队伍位置：%s\n\n%s" % [
 		String(definition.get("display_name", "")),
 		String(detail.get("profession_display_name", "")),
+		int(roster_record.get("level", 1)),
+		int(roster_record.get("experience", 0)),
+		int(roster_record.get("experience_to_next_level", 100)),
 		int(runtime_state.get("current_hp", 0)),
 		int(detail.get("final_stat_details", {}).get("max_hp", {}).get("final", 0)),
-		String(skill.get("skill_name", "无")),
+		injury_text,
+		party_position,
 		String(definition.get("description", "")),
 	]
 
@@ -2234,17 +2338,17 @@ func refresh_character_page() -> void:
 		format_stat_line("攻击", stat_details.get("attack", {})),
 		format_stat_line("防御", stat_details.get("defense", {})),
 		format_stat_line("速度", stat_details.get("speed", {})),
+		"暴击率  %.1f%%" % (float(stat_details.get("crit_rate", {}).get("final", 0.0)) * 100.0),
+		"暴击伤害  %.1f%%" % (float(stat_details.get("crit_damage", {}).get("final", 1.5)) * 100.0),
 	])
 
-	var life_stats: Dictionary = definition.get("life_stats", {})
-	character_life_label.text = "种植 %d\n锻造 %d\n烹饪 %d\n医疗 %d\n研究 %d\n采集 %d" % [
-		int(life_stats.get("farming", 0)),
-		int(life_stats.get("smithing", 0)),
-		int(life_stats.get("cooking", 0)),
-		int(life_stats.get("medicine", 0)),
-		int(life_stats.get("research", 0)),
-		int(life_stats.get("gathering", 0)),
-	]
+	var skill_lines := PackedStringArray()
+	for skill: Dictionary in skills:
+		skill_lines.append("%s（冷却 %d 回合）" % [
+			String(skill.get("skill_name", "未命名技能")),
+			int(skill.get("skill_cooldown_duration", 0)),
+		])
+	character_skill_label.text = "\n".join(skill_lines) if not skill_lines.is_empty() else "无"
 
 	var trait_lines := PackedStringArray()
 	for trait_data: Dictionary in detail.get("traits", []):
@@ -2252,7 +2356,19 @@ func refresh_character_page() -> void:
 			String(trait_data.get("display_name", "")),
 			String(trait_data.get("description", "")),
 		])
-	character_trait_label.text = "\n\n".join(trait_lines)
+	character_trait_label.text = "\n\n".join(trait_lines) if not trait_lines.is_empty() else "无"
+
+	var party_ids: Array[StringName] = game_state.get_character_ids()
+	var can_edit_party: bool = game_state.can_edit_party()
+	character_party_label.text = "当前：%s\n出战顺序：%s" % [
+		party_position,
+		" → ".join(PackedStringArray(party_ids.map(func(character_id: StringName) -> String: return game_state.get_character_display_name(character_id)))),
+	]
+	character_party_toggle_button.text = "设为待命" if is_in_party else "加入出战"
+	character_party_toggle_button.disabled = not can_edit_party or (is_in_party and party_ids.size() <= 1) or (not is_in_party and party_ids.size() >= 4)
+	character_party_toggle_button.tooltip_text = "远征或战斗期间不能调整队伍" if not can_edit_party else ("至少保留1名出战角色" if is_in_party and party_ids.size() <= 1 else "")
+	character_party_up_button.disabled = not can_edit_party or not is_in_party or party_slot <= 0
+	character_party_down_button.disabled = not can_edit_party or not is_in_party or party_slot < 0 or party_slot >= party_ids.size() - 1
 
 	var equipped_weapon: Dictionary = game_state.get_character_equipped_item_data(selected_character_id, &"weapon")
 	var equipped_armor: Dictionary = game_state.get_character_equipped_item_data(selected_character_id, &"armor")
@@ -2308,9 +2424,10 @@ func add_character_section(parent: Control, title_text: String) -> Label:
 
 
 func format_stat_line(display_name: String, detail: Dictionary) -> String:
-	return "%s  基础:%d  村庄:%s  特性:%s  装备:%s  最终:%d" % [
+	return "%s  基础:%d  成长:%s  村庄:%s  特性:%s  装备:%s  最终:%d" % [
 		display_name,
 		int(detail.get("base", 0)),
+		format_signed_amount(int(detail.get("level_growth_bonus", 0))),
 		format_signed_amount(int(detail.get("village_bonus", 0))),
 		format_signed_amount(int(detail.get("trait_bonus", 0))),
 		format_signed_amount(int(detail.get("equipment_bonus", 0))),

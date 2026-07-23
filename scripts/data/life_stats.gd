@@ -7,6 +7,8 @@ extends Resource
 @export var medicine: int = 0
 @export var research: int = 0
 @export var gathering: int = 0
+@export var crafting: int = 0
+@export var medical: int = 0
 
 
 func setup(
@@ -16,13 +18,28 @@ func setup(
 	p_medicine: int,
 	p_research: int,
 	p_gathering: int
-):
+) -> LifeStats:
 	farming = p_farming
 	smithing = p_smithing
 	cooking = p_cooking
 	medicine = p_medicine
 	research = p_research
 	gathering = p_gathering
+	crafting = p_smithing
+	medical = p_medicine
+	return self
+
+
+func setup_core(p_farming: int, p_crafting: int, p_gathering: int, p_research: int, p_medical: int) -> LifeStats:
+	farming = p_farming
+	crafting = p_crafting
+	gathering = p_gathering
+	research = p_research
+	medical = p_medical
+	# Legacy aliases remain populated for existing character-detail consumers.
+	smithing = p_crafting
+	medicine = p_medical
+	cooking = 0
 	return self
 
 
@@ -34,4 +51,32 @@ func to_dictionary() -> Dictionary:
 		"medicine": medicine,
 		"research": research,
 		"gathering": gathering,
+		"crafting": crafting,
+		"medical": medical,
 	}
+
+
+func to_core_dictionary() -> Dictionary:
+	return {
+		"farming": farming,
+		"crafting": crafting,
+		"gathering": gathering,
+		"research": research,
+		"medical": medical,
+	}
+
+
+static func from_dictionary(data: Dictionary) -> LifeStats:
+	var parsed_crafting := int(data.get("crafting", data.get("smithing", 0)))
+	var parsed_medical := int(data.get("medical", data.get("medicine", 0)))
+	var result := LifeStats.new().setup_core(
+		int(data.get("farming", 0)),
+		parsed_crafting,
+		int(data.get("gathering", 0)),
+		int(data.get("research", 0)),
+		parsed_medical
+	)
+	result.smithing = int(data.get("smithing", parsed_crafting))
+	result.cooking = int(data.get("cooking", 0))
+	result.medicine = int(data.get("medicine", parsed_medical))
+	return result

@@ -16,3 +16,10 @@ func to_dictionary() -> Dictionary:
 		"instance_id": instance_id,
 		"equipment_id": equipment_id,
 	}
+
+
+static func from_dictionary(data: Dictionary) -> EquipmentInstance:
+	return EquipmentInstance.new().setup(
+		StringName(data.get("instance_id", &"")),
+		StringName(data.get("equipment_id", &""))
+	)

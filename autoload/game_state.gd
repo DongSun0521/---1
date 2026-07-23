@@ -51,6 +51,7 @@ signal medicine_production_completed(amount: int)
 signal character_injury_changed(character_id: StringName, injury_state: StringName)
 signal character_treatment_started(character_id: StringName)
 signal character_treatment_completed(character_id: StringName)
+signal character_roster_changed
 
 const VillageSystemScript := preload("res://systems/village_system.gd")
 const ExpeditionSystemScript := preload("res://systems/expedition_system.gd")
@@ -64,8 +65,13 @@ const ForgeSystemScript := preload("res://systems/forge_system.gd")
 const FoodWorkshopSystemScript := preload("res://systems/food_workshop_system.gd")
 const HospitalSystemScript := preload("res://systems/hospital_system.gd")
 const DailyReportScript := preload("res://scripts/data/daily_report.gd")
+const CharacterRosterScript := preload("res://systems/character_roster.gd")
+const SaveSystemScript := preload("res://systems/save_system.gd")
 
 const INITIAL_DAY := 1
+const BATTLE_EXPERIENCE_NORMAL := 40
+const BATTLE_EXPERIENCE_BOSS := 100
+const BATTLE_EXPERIENCE_DEFEAT := 10
 const INITIAL_RESOURCES := {
 	"food": 20,
 	"medicine": 3,
@@ -159,6 +165,8 @@ var equipment_system: RefCounted = EquipmentSystemScript.new()
 var forge_system: RefCounted = ForgeSystemScript.new()
 var food_workshop_system: RefCounted = FoodWorkshopSystemScript.new()
 var hospital_system: RefCounted = HospitalSystemScript.new()
+var character_roster: CharacterRoster = CharacterRosterScript.new()
+var save_system: SaveSystem = SaveSystemScript.new()
 var expedition_state: Dictionary = {}
 var last_expedition_action_report: Dictionary = {}
 var last_expedition_report: Dictionary = {}
@@ -195,7 +203,8 @@ func start_new_game() -> void:
 	building_system.ensure_initial_runtime_state(self)
 	farm_plot_states = farm_system.create_initial_plot_states(int(buildings.get("farm", {}).get("level", 1)))
 	project_state = project_system.create_initial_state()
-	character_runtime_states = character_database.create_initial_runtime_states()
+	character_roster.initialize_defaults(character_database)
+	character_runtime_states = character_roster.create_combat_runtime_adapter()
 	equipment_inventory = equipment_system.create_initial_inventory_state()
 	forge_state = forge_system.create_initial_state()
 	food_production_state = food_workshop_system.create_initial_state()
@@ -242,6 +251,7 @@ func start_new_game() -> void:
 	food_workshop_state_changed.emit()
 	hospital_state_changed.emit()
 	emit_all_stackable_item_count_changed()
+	character_roster_changed.emit()
 	expedition_meal_changed.emit(&"")
 	daily_report_generated.emit(last_daily_report.duplicate(true))
 	state_changed.emit()
@@ -1179,6 +1189,7 @@ func complete_pending_battle_result() -> bool:
 
 
 func process_battle_result(result: Dictionary) -> void:
+	_grant_battle_result_experience(result)
 	last_battle_result = result.duplicate(true)
 	if String(result["outcome"]) == "victory":
 		statistics["total_battles_won"] = int(statistics.get("total_battles_won", 0)) + 1
@@ -1238,10 +1249,183 @@ func get_battle_enemy_states() -> Array:
 
 
 func get_character_ids() -> Array[StringName]:
-	return character_database.get_party_order()
+	return character_roster.get_party_character_ids()
+
+
+func can_edit_party() -> bool:
+	return not is_expedition_active() and not is_battle_active()
+
+
+func set_party_members(character_ids: Array) -> bool:
+	if not can_edit_party():
+		return false
+	var typed_ids: Array[StringName] = []
+	for raw_id in character_ids:
+		typed_ids.append(StringName(raw_id))
+	if not character_roster.set_party_members(typed_ids):
+		return false
+	_after_party_changed()
+	return true
+
+
+func set_character_party_status(character_id: StringName, is_in_party: bool) -> bool:
+	if not can_edit_party() or not character_roster.set_character_party_status(character_id, is_in_party):
+		return false
+	_after_party_changed()
+	return true
+
+
+func move_party_character(character_id: StringName, target_slot: int) -> bool:
+	if not can_edit_party() or not character_roster.move_party_character(character_id, target_slot):
+		return false
+	_after_party_changed()
+	return true
+
+
+func get_roster_character_ids() -> Array[StringName]:
+	var ids: Array[StringName] = []
+	for snapshot: Dictionary in character_roster.get_all_character_snapshots():
+		ids.append(StringName(snapshot.get("character_id", &"")))
+	return ids
+
+
+func get_all_combat_characters() -> Array:
+	return character_roster.get_combat_character_snapshots()
+
+
+func get_all_life_characters() -> Array:
+	return character_roster.get_life_character_snapshots()
+
+
+func get_character_roster_data() -> Dictionary:
+	return character_roster.to_dictionary()
+
+
+func get_roster_character(character_id: StringName) -> Dictionary:
+	return character_roster.get_character_snapshot(character_id)
+
+
+func has_roster_character(character_id: StringName) -> bool:
+	return character_roster.has_character(character_id)
+
+
+func generate_character_id(prefix: String = "character") -> StringName:
+	return character_roster.generate_unique_id(prefix)
+
+
+func add_roster_character(character_data: Dictionary) -> bool:
+	if not character_roster.add_character_from_dictionary(character_data):
+		return false
+	character_runtime_states = character_roster.create_combat_runtime_adapter()
+	character_roster_changed.emit()
+	character_data_changed.emit(StringName(character_data.get("character_id", &"")))
+	state_changed.emit()
+	return true
+
+
+func remove_roster_character(character_id: StringName) -> bool:
+	if not character_roster.remove_character(character_id):
+		return false
+	character_runtime_states = character_roster.create_combat_runtime_adapter()
+	rebuild_adventurers_from_character_data(false)
+	character_roster_changed.emit()
+	state_changed.emit()
+	return true
+
+
+func set_life_character_assignment(character_id: StringName, building_id: StringName, job_id: StringName, work_state: int) -> bool:
+	if not character_roster.set_life_assignment(character_id, building_id, job_id, work_state):
+		return false
+	character_roster_changed.emit()
+	character_data_changed.emit(character_id)
+	state_changed.emit()
+	return true
+
+
+func set_character_progression(character_id: StringName, level: int, experience: int, experience_to_next_level: int) -> bool:
+	if not character_roster.set_character_progression(character_id, level, experience, experience_to_next_level):
+		return false
+	if character_runtime_states.has(character_id):
+		clamp_character_runtime_hp_to_final_max(character_id)
+		rebuild_adventurers_from_character_data(false)
+	character_roster_changed.emit()
+	character_data_changed.emit(character_id)
+	character_final_stats_changed.emit(character_id)
+	state_changed.emit()
+	return true
+
+
+func grant_character_experience(character_id: StringName, amount: int, emit_signals: bool = true) -> Dictionary:
+	var record = character_roster.get_character(character_id)
+	if record == null or not record.is_combat_character():
+		return {"success": false, "character_id": character_id, "levels_gained": 0}
+	var old_max_hp := int(get_final_combat_stats(character_id).get("max_hp", 1))
+	var result: Dictionary = character_roster.grant_experience(character_id, amount)
+	if not bool(result.get("success", false)):
+		return result
+	var new_max_hp := int(get_final_combat_stats(character_id).get("max_hp", old_max_hp))
+	if int(record.combat_data.current_hp) > 0:
+		record.combat_data.current_hp = clampi(
+			int(record.combat_data.current_hp) + maxi(0, new_max_hp - old_max_hp),
+			1,
+			new_max_hp
+		)
+	result["old_max_hp"] = old_max_hp
+	result["new_max_hp"] = new_max_hp
+	result["current_hp"] = int(record.combat_data.current_hp)
+	if emit_signals:
+		rebuild_adventurers_from_character_data(false)
+		character_roster_changed.emit()
+		character_data_changed.emit(character_id)
+		character_runtime_state_changed.emit(character_id)
+		character_final_stats_changed.emit(character_id)
+		state_changed.emit()
+	return result
+
+
+func _grant_battle_result_experience(result: Dictionary) -> void:
+	var experience_reward := BATTLE_EXPERIENCE_DEFEAT
+	if String(result.get("outcome", "")) == "victory":
+		experience_reward = BATTLE_EXPERIENCE_BOSS if bool(result.get("is_boss", false)) else BATTLE_EXPERIENCE_NORMAL
+	var experience_results: Array = []
+	var awarded_ids: Array[StringName] = []
+	for party_unit: Dictionary in result.get("party_states", []):
+		var character_id := StringName(party_unit.get("character_id", party_unit.get("unit_id", &"")))
+		if character_id == &"" or awarded_ids.has(character_id):
+			continue
+		awarded_ids.append(character_id)
+		var experience_result := grant_character_experience(character_id, experience_reward, false)
+		if bool(experience_result.get("success", false)):
+			experience_results.append(experience_result)
+	result["experience_reward"] = experience_reward
+	result["experience_results"] = experience_results
+	if experience_results.is_empty():
+		return
+	rebuild_adventurers_from_character_data(false)
+	character_roster_changed.emit()
+	for experience_result: Dictionary in experience_results:
+		var character_id := StringName(experience_result.get("character_id", &""))
+		character_data_changed.emit(character_id)
+		character_runtime_state_changed.emit(character_id)
+		character_final_stats_changed.emit(character_id)
+
+
+func _after_party_changed() -> void:
+	rebuild_adventurers_from_character_data(false)
+	character_roster_changed.emit()
+	for snapshot: Dictionary in get_all_combat_characters():
+		character_data_changed.emit(StringName(snapshot.get("character_id", &"")))
+	state_changed.emit()
+
+
+func get_character_roster_debug_summary() -> String:
+	return character_roster.get_debug_summary()
 
 
 func get_character_display_name(character_id: StringName) -> String:
+	var record = character_roster.get_character(character_id)
+	if record != null:
+		return String(record.display_name)
 	var definition = character_database.get_character_definition(character_id)
 	if definition == null:
 		return String(character_id)
@@ -1277,9 +1461,19 @@ func get_team_injury_summary() -> Array:
 
 func get_character_definition(character_id: StringName) -> Dictionary:
 	var definition = character_database.get_character_definition(character_id)
-	if definition == null:
-		return {}
-	return definition.to_dictionary()
+	var data: Dictionary = definition.to_dictionary() if definition != null else {}
+	var record = character_roster.get_character(character_id)
+	if record == null:
+		return data
+	var snapshot: Dictionary = record.to_dictionary()
+	for key: String in ["character_id", "character_type", "character_type_name", "display_name", "portrait_path", "quality", "quality_name", "level", "experience", "experience_to_next_level", "traits", "is_locked", "created_sequence", "metadata"]:
+		data[key] = snapshot.get(key)
+	if record.is_combat_character():
+		data["profession_id"] = record.combat_data.profession_id
+		data["base_combat_stats"] = record.combat_data.base_combat_stats.to_dictionary()
+		data["skill_ids"] = record.combat_data.skill_ids.duplicate()
+		data["battle_visual_id"] = record.combat_data.battle_visual_id
+	return data
 
 
 func get_character_runtime_state(character_id: StringName) -> Dictionary:
@@ -1301,37 +1495,40 @@ func get_profession_display_name(profession_id: StringName) -> String:
 
 
 func get_final_combat_stat_details(character_id: StringName) -> Dictionary:
-	var runtime_state = character_runtime_states.get(character_id, null)
-	var injury_state: StringName = runtime_state.injury_state if runtime_state != null else &"healthy"
-	return character_database.get_final_combat_stat_details(
-		character_id,
-		party_attack_bonus + get_expedition_meal_attack_bonus(),
-		party_max_hp_bonus,
+	var record = character_roster.get_character(character_id)
+	if record == null or not record.is_combat_character():
+		return {}
+	return record.combat_data.calculate_final_stat_details(
+		record.level,
 		get_character_equipment_bonuses(character_id),
-		injury_state,
-		get_expedition_meal_max_hp_bonus()
+		{},
+		{
+			"attack": party_attack_bonus + get_expedition_meal_attack_bonus(),
+			"max_hp": party_max_hp_bonus,
+		},
+		{"max_hp": get_expedition_meal_max_hp_bonus()}
 	)
 
 
 func get_final_combat_stats(character_id: StringName) -> Dictionary:
-	var runtime_state = character_runtime_states.get(character_id, null)
-	var injury_state: StringName = runtime_state.injury_state if runtime_state != null else &"healthy"
-	return character_database.get_final_combat_stats(
-		character_id,
-		party_attack_bonus + get_expedition_meal_attack_bonus(),
-		party_max_hp_bonus,
-		get_character_equipment_bonuses(character_id),
-		injury_state,
-		get_expedition_meal_max_hp_bonus()
-	)
+	var details := get_final_combat_stat_details(character_id)
+	var stats: Dictionary = {}
+	for stat_id: String in details.keys():
+		stats[stat_id] = details[stat_id].get("final", 0)
+	return stats
 
 
 func get_character_detail(character_id: StringName) -> Dictionary:
-	return character_database.get_character_detail(
+	var detail: Dictionary = character_database.get_character_detail(
 		character_id,
 		character_runtime_states.get(character_id, null),
 		get_final_combat_stat_details(character_id)
 	)
+	if detail.is_empty():
+		return {"roster_record": get_roster_character(character_id)}
+	detail["definition"] = get_character_definition(character_id)
+	detail["roster_record"] = get_roster_character(character_id)
+	return detail
 
 
 func get_all_character_details() -> Array:
@@ -1427,10 +1624,10 @@ func clamp_character_runtime_hp_to_final_max(character_id: StringName) -> void:
 
 func rebuild_adventurers_from_character_data(emit_signals: bool = true) -> void:
 	var rebuilt: Array = []
-	for character_id: StringName in character_database.get_party_order():
-		var unit: Dictionary = character_database.create_party_unit_state(
+	for character_id: StringName in get_character_ids():
+		var unit: Dictionary = character_roster.create_party_unit_state(
 			character_id,
-			character_runtime_states.get(character_id, null),
+			character_database,
 			get_final_combat_stat_details(character_id)
 		)
 		if not unit.is_empty():
@@ -1458,7 +1655,7 @@ func update_character_runtime_states_from_party(party_states: Array) -> void:
 
 
 func restore_character_runtime_states_full() -> void:
-	for character_id: StringName in character_database.get_party_order():
+	for character_id: StringName in get_character_ids():
 		restore_character_runtime_state_full(character_id)
 
 
@@ -1480,7 +1677,7 @@ func apply_party_attack_bonus(amount: int) -> void:
 
 func apply_party_max_hp_bonus(amount: int) -> void:
 	party_max_hp_bonus += amount
-	for character_id: StringName in character_database.get_party_order():
+	for character_id: StringName in get_character_ids():
 		var runtime_state = character_runtime_states.get(character_id, null)
 		if runtime_state == null:
 			continue
@@ -1516,7 +1713,7 @@ func apply_expedition_meal_bonus(meal_id: StringName) -> void:
 		return
 	var max_hp_bonus := int(meal.get("max_hp_bonus", 0))
 	if max_hp_bonus > 0:
-		for character_id: StringName in character_database.get_party_order():
+		for character_id: StringName in get_character_ids():
 			var runtime_state = character_runtime_states.get(character_id, null)
 			if runtime_state == null:
 				continue
@@ -1535,7 +1732,7 @@ func clear_expedition_meal_bonus() -> void:
 	var state: Dictionary = expedition_state
 	state["active_meal_id"] = &""
 	expedition_state = state
-	for character_id: StringName in character_database.get_party_order():
+	for character_id: StringName in get_character_ids():
 		clamp_character_runtime_hp_to_final_max(character_id)
 	rebuild_adventurers_from_character_data(false)
 	emit_all_character_final_stats_changed()
@@ -1606,6 +1803,55 @@ func get_mvp_summary() -> Dictionary:
 		"statistics": statistics.duplicate(true),
 		"growth": get_growth_summary(),
 	}
+
+
+func create_save_data(base_data: Dictionary = {}) -> Dictionary:
+	return save_system.create_save_data(self, base_data)
+
+
+func load_save_data(data: Dictionary) -> bool:
+	return save_system.load_save_data(self, data)
+
+
+func save_game(path: String = SaveSystemScript.DEFAULT_SAVE_PATH, base_data: Dictionary = {}) -> bool:
+	return save_system.save_to_file(self, path, base_data)
+
+
+func load_game(path: String = SaveSystemScript.DEFAULT_SAVE_PATH) -> bool:
+	return save_system.load_from_file(self, path)
+
+
+func get_save_error() -> String:
+	return save_system.last_error
+
+
+func print_character_roster_debug() -> void:
+	print(get_character_roster_debug_summary())
+
+
+func emit_full_state_refresh_after_load() -> void:
+	emit_all_building_state_changed()
+	emit_day_changed()
+	emit_resources_changed()
+	farm_state_changed.emit()
+	current_node_changed.emit(expedition_state.get("current_node_id", &"village_exit"))
+	supplies_changed.emit()
+	expedition_state_changed.emit()
+	battle_state_changed.emit()
+	project_progress_changed.emit(project_state.duplicate(true))
+	village_upgrades_changed.emit()
+	party_upgrades_changed.emit()
+	boss_defeated_changed.emit()
+	emit_all_character_data_changed()
+	emit_all_character_runtime_state_changed()
+	emit_all_character_final_stats_changed()
+	character_roster_changed.emit()
+	equipment_inventory_changed.emit()
+	forge_state_changed.emit()
+	food_workshop_state_changed.emit()
+	hospital_state_changed.emit()
+	emit_all_stackable_item_count_changed()
+	state_changed.emit()
 
 
 func emit_resources_changed() -> void:
@@ -1692,17 +1938,17 @@ func emit_after_day_advanced() -> void:
 
 
 func emit_all_character_data_changed() -> void:
-	for character_id: StringName in character_database.get_party_order():
+	for character_id: StringName in get_roster_character_ids():
 		character_data_changed.emit(character_id)
 
 
 func emit_all_character_runtime_state_changed() -> void:
-	for character_id: StringName in character_database.get_party_order():
+	for character_id: StringName in get_character_ids():
 		character_runtime_state_changed.emit(character_id)
 
 
 func emit_all_character_final_stats_changed() -> void:
-	for character_id: StringName in character_database.get_party_order():
+	for character_id: StringName in get_character_ids():
 		character_final_stats_changed.emit(character_id)
 
 

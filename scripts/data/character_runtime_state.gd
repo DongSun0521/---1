@@ -39,3 +39,15 @@ func to_dictionary() -> Dictionary:
 		"equipped_armor_instance_id": equipped_armor_instance_id,
 		"injury_state": injury_state,
 	}
+
+
+static func from_dictionary(data: Dictionary) -> CharacterRuntimeState:
+	return CharacterRuntimeState.new().setup(
+		StringName(data.get("character_id", &"")),
+		max(0, int(data.get("current_hp", 0))),
+		StringName(data.get("equipped_weapon_id", &"")),
+		StringName(data.get("equipped_armor_id", &"")),
+		StringName(data.get("equipped_weapon_instance_id", &"")),
+		StringName(data.get("equipped_armor_instance_id", &"")),
+		StringName(data.get("injury_state", &"healthy"))
+	)
