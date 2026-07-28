@@ -150,14 +150,27 @@ func process_daily_hospital(game_state) -> Dictionary:
 		state.result_processed = true
 		report["hospital_project_completed"] = true
 		if StringName(state.project_type) == PROJECT_TYPE_CRAFT_MEDICINE:
-			var amount := int(MEDICINE_RECIPE["medicine_output"])
+			var base_amount := int(MEDICINE_RECIPE["medicine_output"])
+			var amount: int = game_state.calculate_building_production_output(
+				&"hospital", base_amount
+			)
 			var resources: Dictionary = game_state.resources
 			resources["medicine"] = int(resources["medicine"]) + amount
 			game_state.resources = resources
+			report["base_medicine_output"] = base_amount
 			report["medicine_produced"] = amount
 		elif StringName(state.project_type) == PROJECT_TYPE_TREAT_CHARACTER:
 			complete_character_treatment(game_state, StringName(state.target_character_id))
 			report["treatment_completed"] = true
+		report["production_details"] = game_state.get_building_production_details(&"hospital")
+		report["work_experience_results"] = game_state.settle_life_job_work_experience(
+			&"hospital",
+			StringName("hospital_%s_day_%d" % [
+				String(report.get("hospital_project_id", &"")),
+				int(game_state.current_day),
+			])
+		)
+		game_state.record_life_work_feedback(&"hospital", report)
 		state.clear()
 
 	game_state.hospital_project_state = state
@@ -254,7 +267,10 @@ func _empty_daily_report() -> Dictionary:
 		"hospital_progress_after": 0,
 		"hospital_required_days": 0,
 		"hospital_project_completed": false,
+		"base_medicine_output": 0,
 		"medicine_produced": 0,
 		"treated_character_id": &"",
 		"treatment_completed": false,
+		"production_details": {},
+		"work_experience_results": [],
 	}

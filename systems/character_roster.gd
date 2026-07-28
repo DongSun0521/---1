@@ -7,18 +7,23 @@ const CombatCharacterDataScript := preload("res://scripts/data/combat_character_
 const LifeCharacterDataScript := preload("res://scripts/data/life_character_data.gd")
 const CombatStatsScript := preload("res://scripts/data/combat_stats.gd")
 const LifeStatsScript := preload("res://scripts/data/life_stats.gd")
+const Stage12Config := preload("res://scripts/data/stage12_balance_config.gd")
 
 const DEFAULT_COMBAT_IDS: Array[StringName] = [&"guard", &"hunter", &"mage", &"doctor"]
 const DEFAULT_LIFE_IDS: Array[StringName] = [&"life_ahe", &"life_atie", &"life_xiaoyao"]
-const MAX_PARTY_SIZE := 4
-const BASE_EXPERIENCE_TO_NEXT_LEVEL := 100
-const EXPERIENCE_STEP_PER_LEVEL := 50
+const MAX_PARTY_SIZE := Stage12Config.MAX_PARTY_SIZE
+const BASE_EXPERIENCE_TO_NEXT_LEVEL := Stage12Config.COMBAT_EXPERIENCE_BASE
+const EXPERIENCE_STEP_PER_LEVEL := Stage12Config.COMBAT_EXPERIENCE_STEP
+const LIFE_BASE_EXPERIENCE_TO_NEXT_LEVEL := Stage12Config.LIFE_EXPERIENCE_BASE
+const LIFE_EXPERIENCE_STEP_PER_LEVEL := Stage12Config.LIFE_EXPERIENCE_STEP
+const LIFE_STAT_GROWTH_PER_LEVEL := Stage12Config.LIFE_STAT_GROWTH_PER_LEVEL
+const LIFE_STAT_TIE_BREAK_ORDER: Array[StringName] = Stage12Config.LIFE_STAT_TIE_BREAK_ORDER
+const LEVEL_GROWTH_BY_CHARACTER := Stage12Config.COMBAT_LEVEL_GROWTH_BY_CHARACTER
 
-const LEVEL_GROWTH_BY_CHARACTER := {
-	&"guard": {"max_hp": 8, "attack": 1, "defense": 2, "speed": 0},
-	&"hunter": {"max_hp": 4, "attack": 2, "defense": 1, "speed": 1},
-	&"mage": {"max_hp": 4, "attack": 3, "defense": 0, "speed": 0},
-	&"doctor": {"max_hp": 5, "attack": 1, "defense": 1, "speed": 1},
+const DEFAULT_LIFE_TRAITS := {
+	&"life_ahe": [&"seasoned_farmer"],
+	&"life_atie": [&"steady_hands"],
+	&"life_xiaoyao": [&"herbal_instinct"],
 }
 
 const COMBAT_CLASS_BY_PROFESSION := {
@@ -89,6 +94,8 @@ func add_character(record: CharacterRecord) -> bool:
 		return false
 	if not record.is_combat_character() and not record.is_life_character():
 		return false
+	if record.is_life_character():
+		record.portrait_path = Stage12Config.resolve_life_portrait_path(record.portrait_path)
 	characters[record.character_id] = record
 	character_order.append(record.character_id)
 	next_generated_sequence = maxi(next_generated_sequence, record.created_sequence + 1)
@@ -238,6 +245,22 @@ func generate_unique_id(prefix: String = "character") -> StringName:
 	return generated_id
 
 
+func get_next_generated_sequence() -> int:
+	return next_generated_sequence
+
+
+func ensure_next_generated_sequence_at_least(minimum_sequence: int) -> void:
+	next_generated_sequence = maxi(next_generated_sequence, maxi(1, minimum_sequence))
+
+
+func set_character_locked(character_id: StringName, is_locked: bool) -> bool:
+	var record := get_character(character_id)
+	if record == null:
+		return false
+	record.is_locked = is_locked
+	return true
+
+
 func set_life_assignment(
 	character_id: StringName,
 	building_id: StringName,
@@ -253,13 +276,112 @@ func set_life_assignment(
 	return true
 
 
-func set_character_progression(character_id: StringName, level: int, experience: int, experience_to_next_level: int) -> bool:
+func set_life_work_experience(character_id: StringName, work_experience: int) -> bool:
+	var record := get_character(character_id)
+	if record == null or not record.is_life_character():
+		return false
+	if record.level >= Stage12Config.LIFE_MAX_LEVEL:
+		record.experience = 0
+		record.experience_to_next_level = 0
+	else:
+		record.experience = max(0, work_experience)
+		record.experience_to_next_level = get_life_experience_to_next_level(record.level)
+	record.life_data.work_experience = record.experience
+	return true
+
+
+func grant_life_experience(
+	character_id: StringName,
+	amount: int,
+	preferred_stat_id: StringName = &""
+) -> Dictionary:
+	var record := get_character(character_id)
+	if record == null or not record.is_life_character() or amount <= 0:
+		return {"success": false, "character_id": character_id, "levels_gained": 0}
+	var old_level := record.level
+	var old_experience := record.experience
+	var growth_by_stat: Dictionary = {}
+	if record.level >= Stage12Config.LIFE_MAX_LEVEL:
+		record.level = Stage12Config.LIFE_MAX_LEVEL
+		record.experience = 0
+		record.experience_to_next_level = 0
+		record.life_data.work_experience = 0
+		return {
+			"success": true,
+			"character_id": character_id,
+			"experience_gained": amount,
+			"experience_applied": 0,
+			"discarded_experience": amount,
+			"old_level": old_level,
+			"new_level": record.level,
+			"levels_gained": 0,
+			"old_experience": old_experience,
+			"experience": 0,
+			"experience_to_next_level": 0,
+			"growth_by_stat": growth_by_stat,
+			"at_max_level": true,
+		}
+	record.experience_to_next_level = get_life_experience_to_next_level(record.level)
+	record.experience += amount
+	while record.level < Stage12Config.LIFE_MAX_LEVEL \
+			and record.experience_to_next_level > 0 \
+			and record.experience >= record.experience_to_next_level:
+		record.experience -= record.experience_to_next_level
+		record.level += 1
+		var growth_stat_id := _resolve_life_growth_stat(record, preferred_stat_id)
+		var applied_growth := record.life_data.life_stats.increase_core_stat(
+			growth_stat_id, LIFE_STAT_GROWTH_PER_LEVEL
+		)
+		growth_by_stat[growth_stat_id] = int(growth_by_stat.get(growth_stat_id, 0)) + applied_growth
+		record.experience_to_next_level = get_life_experience_to_next_level(record.level)
+	var discarded_experience := 0
+	if record.level >= Stage12Config.LIFE_MAX_LEVEL:
+		discarded_experience = record.experience
+		record.experience = 0
+		record.experience_to_next_level = 0
+	record.life_data.work_experience = record.experience
+	return {
+		"success": true,
+		"character_id": character_id,
+		"experience_gained": amount,
+		"experience_applied": maxi(0, amount - discarded_experience),
+		"discarded_experience": discarded_experience,
+		"old_level": old_level,
+		"new_level": record.level,
+		"levels_gained": record.level - old_level,
+		"old_experience": old_experience,
+		"experience": record.experience,
+		"experience_to_next_level": record.experience_to_next_level,
+		"growth_by_stat": growth_by_stat,
+		"at_max_level": record.level >= Stage12Config.LIFE_MAX_LEVEL,
+	}
+
+
+func get_life_experience_to_next_level(level: int) -> int:
+	if level >= Stage12Config.LIFE_MAX_LEVEL:
+		return 0
+	return LIFE_BASE_EXPERIENCE_TO_NEXT_LEVEL \
+		+ max(0, level - 1) * LIFE_EXPERIENCE_STEP_PER_LEVEL
+
+
+func set_character_progression(character_id: StringName, level: int, experience: int, _experience_to_next_level: int) -> bool:
 	var record := get_character(character_id)
 	if record == null:
 		return false
-	record.level = max(1, level)
-	record.experience = max(0, experience)
-	record.experience_to_next_level = max(1, experience_to_next_level)
+	var max_level := get_max_level_for_character(record)
+	record.level = clampi(level, 1, max_level)
+	if record.level >= max_level:
+		record.experience = 0
+		record.experience_to_next_level = 0
+	else:
+		record.experience = max(0, experience)
+		record.experience_to_next_level = (
+			get_life_experience_to_next_level(record.level)
+			if record.is_life_character()
+			else get_experience_to_next_level(record.level)
+		)
+	if record.is_life_character():
+		record.life_data.work_experience = record.experience
 	return true
 
 
@@ -268,25 +390,106 @@ func grant_experience(character_id: StringName, amount: int) -> Dictionary:
 	if record == null or not record.is_combat_character() or amount <= 0:
 		return {"success": false, "character_id": character_id, "levels_gained": 0}
 	var old_level := record.level
+	var old_experience := record.experience
+	if record.level >= Stage12Config.COMBAT_MAX_LEVEL:
+		record.level = Stage12Config.COMBAT_MAX_LEVEL
+		record.experience = 0
+		record.experience_to_next_level = 0
+		return {
+			"success": true,
+			"character_id": character_id,
+			"experience_gained": amount,
+			"experience_applied": 0,
+			"discarded_experience": amount,
+			"old_level": old_level,
+			"new_level": record.level,
+			"levels_gained": 0,
+			"old_experience": old_experience,
+			"experience": 0,
+			"experience_to_next_level": 0,
+			"at_max_level": true,
+		}
+	record.experience_to_next_level = get_experience_to_next_level(record.level)
 	record.experience += amount
-	while record.experience >= record.experience_to_next_level:
+	while record.level < Stage12Config.COMBAT_MAX_LEVEL \
+			and record.experience_to_next_level > 0 \
+			and record.experience >= record.experience_to_next_level:
 		record.experience -= record.experience_to_next_level
 		record.level += 1
 		record.experience_to_next_level = get_experience_to_next_level(record.level)
+	var discarded_experience := 0
+	if record.level >= Stage12Config.COMBAT_MAX_LEVEL:
+		discarded_experience = record.experience
+		record.experience = 0
+		record.experience_to_next_level = 0
 	return {
 		"success": true,
 		"character_id": character_id,
 		"experience_gained": amount,
+		"experience_applied": maxi(0, amount - discarded_experience),
+		"discarded_experience": discarded_experience,
 		"old_level": old_level,
 		"new_level": record.level,
 		"levels_gained": record.level - old_level,
+		"old_experience": old_experience,
 		"experience": record.experience,
 		"experience_to_next_level": record.experience_to_next_level,
+		"at_max_level": record.level >= Stage12Config.COMBAT_MAX_LEVEL,
 	}
 
 
 func get_experience_to_next_level(level: int) -> int:
+	if level >= Stage12Config.COMBAT_MAX_LEVEL:
+		return 0
 	return BASE_EXPERIENCE_TO_NEXT_LEVEL + max(0, level - 1) * EXPERIENCE_STEP_PER_LEVEL
+
+
+func get_max_level_for_character(record: CharacterRecord) -> int:
+	if record != null and record.is_life_character():
+		return Stage12Config.LIFE_MAX_LEVEL
+	return Stage12Config.COMBAT_MAX_LEVEL
+
+
+func ensure_stage12f_defaults(_previous_save_version: int) -> void:
+	for record: CharacterRecord in get_all_characters():
+		var max_level := get_max_level_for_character(record)
+		record.level = clampi(record.level, 1, max_level)
+		record.experience = max(0, record.experience)
+		if record.is_life_character():
+			if record.life_data.life_stats == null:
+				record.life_data.life_stats = LifeStatsScript.new().setup_core(0, 0, 0, 0, 0)
+			record.life_data.life_stats.clamp_core_stats()
+			record.portrait_path = Stage12Config.resolve_life_portrait_path(record.portrait_path)
+			record.experience_to_next_level = get_life_experience_to_next_level(record.level)
+			while record.level < max_level \
+					and record.experience_to_next_level > 0 \
+					and record.experience >= record.experience_to_next_level:
+				record.experience -= record.experience_to_next_level
+				record.level += 1
+				var growth_stat_id := _resolve_life_growth_stat(record, &"")
+				record.life_data.life_stats.increase_core_stat(
+					growth_stat_id, LIFE_STAT_GROWTH_PER_LEVEL
+				)
+				record.experience_to_next_level = get_life_experience_to_next_level(record.level)
+			if record.level >= max_level:
+				record.experience = 0
+				record.experience_to_next_level = 0
+			record.life_data.work_experience = record.experience
+		elif record.is_combat_character():
+			if DEFAULT_COMBAT_IDS.has(record.character_id):
+				record.combat_data.level_growth_stats = _create_level_growth_stats(record.character_id)
+			record.experience_to_next_level = get_experience_to_next_level(record.level)
+			while record.level < max_level \
+					and record.experience_to_next_level > 0 \
+					and record.experience >= record.experience_to_next_level:
+				record.experience -= record.experience_to_next_level
+				record.level += 1
+				record.experience_to_next_level = get_experience_to_next_level(record.level)
+			if record.level >= max_level:
+				record.experience = 0
+				record.experience_to_next_level = 0
+			record.combat_data.current_hp = max(0, record.combat_data.current_hp)
+	_normalize_party_slots()
 
 
 func ensure_stage12b_defaults(previous_save_version: int) -> void:
@@ -298,6 +501,73 @@ func ensure_stage12b_defaults(previous_save_version: int) -> void:
 			record.combat_data.level_growth_stats = _create_level_growth_stats(character_id)
 			record.experience_to_next_level = get_experience_to_next_level(record.level)
 	_normalize_party_slots()
+
+
+func ensure_stage12c_defaults(previous_save_version: int) -> void:
+	if previous_save_version >= 3:
+		return
+	for character_id: StringName in DEFAULT_LIFE_IDS:
+		var record := get_character(character_id)
+		if record == null or not record.is_life_character() or not record.life_data.life_trait_ids.is_empty():
+			continue
+		var trait_ids: Array[StringName] = []
+		for raw_trait_id in DEFAULT_LIFE_TRAITS.get(character_id, []):
+			trait_ids.append(StringName(raw_trait_id))
+		record.life_data.life_trait_ids = trait_ids
+
+
+func ensure_stage12d_defaults(previous_save_version: int) -> void:
+	for record: CharacterRecord in get_all_life_characters():
+		if record.life_data.life_stats == null:
+			record.life_data.life_stats = LifeStatsScript.new().setup_core(0, 0, 0, 0, 0)
+		record.life_data.life_stats.clamp_core_stats()
+		record.level = clampi(record.level, 1, Stage12Config.LIFE_MAX_LEVEL)
+		if previous_save_version < 4:
+			record.experience = max(record.experience, record.life_data.work_experience)
+		record.experience = max(0, record.experience)
+		record.experience_to_next_level = get_life_experience_to_next_level(record.level)
+		while record.level < Stage12Config.LIFE_MAX_LEVEL \
+				and record.experience_to_next_level > 0 \
+				and record.experience >= record.experience_to_next_level:
+			record.experience -= record.experience_to_next_level
+			record.level += 1
+			var growth_stat_id := _resolve_life_growth_stat(record, &"")
+			record.life_data.life_stats.increase_core_stat(
+				growth_stat_id, LIFE_STAT_GROWTH_PER_LEVEL
+			)
+			record.experience_to_next_level = get_life_experience_to_next_level(record.level)
+		if record.level >= Stage12Config.LIFE_MAX_LEVEL:
+			record.experience = 0
+			record.experience_to_next_level = 0
+		record.life_data.work_experience = record.experience
+
+		if record.life_data.life_trait_ids.is_empty() and DEFAULT_LIFE_TRAITS.has(record.character_id):
+			var trait_ids: Array[StringName] = []
+			for raw_trait_id in DEFAULT_LIFE_TRAITS.get(record.character_id, []):
+				trait_ids.append(StringName(raw_trait_id))
+			record.life_data.life_trait_ids = trait_ids
+
+
+func ensure_stage12e_defaults(_previous_save_version: int) -> void:
+	var used_sequences: Dictionary = {}
+	var next_sequence := 1
+	for character_id: StringName in character_order:
+		var record := get_character(character_id)
+		if record == null:
+			continue
+		if record.created_sequence <= 0 or used_sequences.has(record.created_sequence):
+			while used_sequences.has(next_sequence):
+				next_sequence += 1
+			record.created_sequence = next_sequence
+			used_sequences[next_sequence] = true
+		else:
+			used_sequences[record.created_sequence] = true
+		next_sequence = maxi(next_sequence, record.created_sequence + 1)
+		if record.is_life_character():
+			var metadata := record.metadata.duplicate(true)
+			metadata.erase("is_recruitment_candidate")
+			record.metadata = metadata
+	ensure_next_generated_sequence_at_least(next_sequence)
 
 
 func create_combat_runtime_adapter() -> Dictionary:
@@ -438,8 +708,15 @@ func _add_default_life_character(character_id: StringName, display_name: String,
 		_take_sequence()
 	)
 	record.quality = CharacterEnumsScript.Quality.COMMON
+	record.portrait_path = String(Stage12Config.DEFAULT_LIFE_PORTRAIT_BY_CHARACTER.get(
+		character_id, Stage12Config.DEFAULT_LIFE_PORTRAIT_PATH
+	))
+	record.experience_to_next_level = get_life_experience_to_next_level(record.level)
 	record.metadata = {"is_debug_character": true}
-	record.life_data = LifeCharacterDataScript.new().setup(stats)
+	var trait_ids: Array[StringName] = []
+	for raw_trait_id in DEFAULT_LIFE_TRAITS.get(character_id, []):
+		trait_ids.append(StringName(raw_trait_id))
+	record.life_data = LifeCharacterDataScript.new().setup(stats, trait_ids)
 	add_character(record)
 
 
@@ -471,6 +748,19 @@ func _create_level_growth_stats(character_id: StringName) -> CombatStats:
 		0.0,
 		0.0
 	)
+
+
+func _resolve_life_growth_stat(record: CharacterRecord, preferred_stat_id: StringName) -> StringName:
+	if preferred_stat_id in LIFE_STAT_TIE_BREAK_ORDER:
+		return preferred_stat_id
+	var selected_stat_id := LIFE_STAT_TIE_BREAK_ORDER[0]
+	var selected_value := -1
+	for stat_id: StringName in LIFE_STAT_TIE_BREAK_ORDER:
+		var value := record.life_data.life_stats.get_core_stat(stat_id)
+		if value > selected_value:
+			selected_stat_id = stat_id
+			selected_value = value
+	return selected_stat_id
 
 
 func _normalize_party_slots() -> void:

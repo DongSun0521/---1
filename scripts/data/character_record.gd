@@ -4,6 +4,7 @@ extends RefCounted
 const CharacterEnumsScript := preload("res://scripts/data/character_enums.gd")
 const CombatCharacterDataScript := preload("res://scripts/data/combat_character_data.gd")
 const LifeCharacterDataScript := preload("res://scripts/data/life_character_data.gd")
+const Stage12Config := preload("res://scripts/data/stage12_balance_config.gd")
 
 var character_id: StringName = &""
 var character_type: int = CharacterEnumsScript.CharacterType.COMBAT
@@ -69,9 +70,14 @@ func apply_dictionary(data: Dictionary) -> CharacterRecord:
 	display_name = String(data.get("display_name", String(character_id)))
 	portrait_path = String(data.get("portrait_path", ""))
 	quality = clampi(int(data.get("quality", CharacterEnumsScript.Quality.COMMON)), CharacterEnumsScript.Quality.COMMON, CharacterEnumsScript.Quality.LEGENDARY)
-	level = max(1, int(data.get("level", 1)))
+	var max_level := Stage12Config.COMBAT_MAX_LEVEL \
+		if character_type == CharacterEnumsScript.CharacterType.COMBAT \
+		else Stage12Config.LIFE_MAX_LEVEL
+	level = clampi(int(data.get("level", 1)), 1, max_level)
 	experience = max(0, int(data.get("experience", 0)))
-	experience_to_next_level = max(1, int(data.get("experience_to_next_level", 100)))
+	experience_to_next_level = 0 if level >= max_level else max(
+		1, int(data.get("experience_to_next_level", 100))
+	)
 	traits = _to_string_name_array(data.get("traits", data.get("trait_ids", [])))
 	is_locked = bool(data.get("is_locked", false))
 	created_sequence = max(0, int(data.get("created_sequence", data.get("created_timestamp", 0))))

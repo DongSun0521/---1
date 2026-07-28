@@ -135,11 +135,13 @@ func process_daily_production(game_state: Node) -> Dictionary:
 	var output_amount := 0
 	if completed:
 		output_item_id = recipe.output_item_id
-		output_amount = int(recipe.output_amount)
+		output_amount = game_state.calculate_building_production_output(
+			&"food_workshop", int(recipe.output_amount)
+		)
 		game_state.add_item(output_item_id, output_amount, false)
 		game_state.food_production_state.clear()
 
-	return _make_report(
+	var report := _make_report(
 		game_state,
 		recipe_id,
 		true,
@@ -148,6 +150,14 @@ func process_daily_production(game_state: Node) -> Dictionary:
 		progress_before,
 		min(progress_after, required_days)
 	)
+	report["work_experience_results"] = []
+	if completed:
+		report["work_experience_results"] = game_state.settle_life_job_work_experience(
+			&"food_workshop",
+			StringName("food_workshop_%s_day_%d" % [String(recipe_id), int(game_state.current_day)])
+		)
+		game_state.record_life_work_feedback(&"food_workshop", report)
+	return report
 
 
 func get_active_summary(game_state: Node) -> String:
@@ -192,7 +202,10 @@ func _make_report(
 ) -> Dictionary:
 	var recipe = get_recipe_definition(recipe_id)
 	var required_days := int(recipe.duration_days) if recipe != null else 0
-	var output_amount := int(recipe.output_amount) if recipe != null and completed else 0
+	var base_output_amount := int(recipe.output_amount) if recipe != null and completed else 0
+	var output_amount: int = game_state.calculate_building_production_output(
+		&"food_workshop", base_output_amount
+	) if completed else 0
 	var output_display_name: String = game_state.get_item_display_name(output_item_id) if output_item_id != &"" else ""
 	var progress_update := {
 		"recipe_id": recipe_id,
@@ -201,6 +214,7 @@ func _make_report(
 		"required_days": required_days,
 		"completed": completed,
 		"output_item_id": output_item_id,
+		"base_output_amount": base_output_amount,
 		"output_amount": output_amount,
 	}
 	return {
@@ -215,7 +229,9 @@ func _make_report(
 		"required_days": required_days,
 		"output_item_id": output_item_id,
 		"output_item_display_name": output_display_name,
+		"base_output_amount": base_output_amount,
 		"output_amount": output_amount,
+		"production_details": game_state.get_building_production_details(&"food_workshop"),
 		"effect_text": "食物制造完成：%s ×%d 已自动存入仓库。" % [output_display_name, output_amount] if completed else "",
 	}
 

@@ -1,5 +1,7 @@
 extends MarginContainer
 
+signal battle_result_acknowledged(result: Dictionary)
+
 const ACTION_BASIC_ATTACK := &"basic_attack"
 const ACTION_SKILL := &"skill"
 const ACTION_DEFEND := &"defend"
@@ -37,6 +39,10 @@ var target_hint_label: Label
 var log_label: Label
 var result_overlay: PanelContainer
 var result_label: Label
+var result_detail_label: Label
+var result_continue_button: Button
+var result_presentation_active: bool = false
+var presented_battle_result: Dictionary = {}
 var attack_button: Button
 var skill_button: Button
 var defend_button: Button
@@ -169,7 +175,7 @@ func build_result_overlay() -> void:
 	result_overlay = create_panel("ResultOverlay", 0.82)
 	result_overlay.visible = false
 	result_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
-	set_anchor_rect(result_overlay, Rect2(0.32, 0.34, 0.36, 0.22))
+	set_anchor_rect(result_overlay, Rect2(0.22, 0.15, 0.56, 0.68))
 	root.add_child(result_overlay)
 
 	var margin := create_margin(22)
@@ -180,6 +186,26 @@ func build_result_overlay() -> void:
 	result_label = create_label("", 32, Color(1.0, 0.90, 0.54), HORIZONTAL_ALIGNMENT_CENTER)
 	result_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	box.add_child(result_label)
+	var result_scroll := ScrollContainer.new()
+	result_scroll.name = "BattleResultScroll"
+	result_scroll.custom_minimum_size = Vector2(0, 410)
+	result_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	result_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	box.add_child(result_scroll)
+	result_detail_label = create_label(
+		"",
+		18,
+		Color(0.95, 0.95, 0.88),
+		HORIZONTAL_ALIGNMENT_LEFT
+	)
+	result_detail_label.name = "BattleResultExperienceDetails"
+	result_detail_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	result_detail_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	result_scroll.add_child(result_detail_label)
+	result_continue_button = create_action_button("确认并继续", true)
+	result_continue_button.name = "BattleResultContinueButton"
+	result_continue_button.pressed.connect(acknowledge_battle_result)
+	box.add_child(result_continue_button)
 
 
 func refresh() -> void:
@@ -193,7 +219,8 @@ func refresh() -> void:
 		target_hint_label.text = ""
 		log_label.text = format_log(battle_state.get("battle_log", []))
 		set_action_buttons_enabled(false)
-		result_overlay.visible = false
+		if not result_presentation_active:
+			result_overlay.visible = false
 		return
 
 	update_unit_views(battle_state)
@@ -373,12 +400,16 @@ func start_action(action_id: StringName, target_id: StringName = &"") -> void:
 	if game_state.has_pending_battle_result():
 		show_pending_result()
 		await get_tree().create_timer(0.9).timeout
+		result_presentation_active = true
 		game_state.complete_pending_battle_result()
+		presented_battle_result = game_state.get_last_battle_result()
+		show_completed_result(presented_battle_result)
 	input_locked = false
 	presentation_in_progress = false
-	result_overlay.visible = false
 	selected_action = &""
 	current_targets = []
+	if result_presentation_active:
+		return
 	refresh()
 
 
@@ -656,6 +687,101 @@ func show_pending_result() -> void:
 	else:
 		effect_player.play_sfx(&"battle_defeat")
 		result_label.text = "远征失败"
+	result_detail_label.text = "正在结算实际出战角色的成长……"
+	result_continue_button.visible = false
+
+
+func show_completed_result(result: Dictionary) -> void:
+	result_overlay.visible = true
+	result_continue_button.visible = true
+	result_label.text = (
+		"Boss战胜利"
+		if String(result.get("outcome", "")) == "victory" and bool(result.get("is_boss", false))
+		else "战斗胜利"
+		if String(result.get("outcome", "")) == "victory"
+		else "远征失败"
+	)
+	result_detail_label.text = format_battle_experience_result(result)
+
+
+func format_battle_experience_result(result: Dictionary) -> String:
+	var lines := PackedStringArray()
+	var reward := int(result.get("experience_reward", 0))
+	lines.append("实际出战角色成长（每人 +%d 经验）" % reward)
+	lines.append("")
+	var experience_results: Array = result.get("experience_results", [])
+	if experience_results.is_empty():
+		lines.append("本次没有可结算的实际出战角色；待命角色未获得经验。")
+		return "\n".join(lines)
+	for experience_result: Dictionary in experience_results:
+		var display_name := String(experience_result.get(
+			"display_name",
+			game_state.get_character_display_name(
+				StringName(experience_result.get("character_id", &""))
+			)
+		))
+		var old_level := int(experience_result.get("old_level", 1))
+		var new_level := int(experience_result.get("new_level", old_level))
+		var levels_gained := int(experience_result.get("levels_gained", 0))
+		var level_text := "Lv.%d → Lv.%d" % [old_level, new_level]
+		if levels_gained > 0:
+			level_text += "｜升级 ×%d" % levels_gained
+		else:
+			level_text += "｜未升级"
+		if bool(experience_result.get("at_max_level", false)):
+			level_text += "｜已满级"
+		lines.append("%s｜经验 +%d｜%s" % [
+			display_name,
+			int(experience_result.get("experience_gained", reward)),
+			level_text,
+		])
+		var stat_changes: Dictionary = experience_result.get("stat_changes", {})
+		var growth_lines := PackedStringArray()
+		for stat_id: String in ["max_hp", "attack", "defense", "speed"]:
+			if not stat_changes.has(stat_id):
+				continue
+			var change: Dictionary = stat_changes[stat_id]
+			growth_lines.append("%s %d→%d（+%d）" % [
+				get_combat_stat_display_name(stat_id),
+				int(change.get("before", 0)),
+				int(change.get("after", 0)),
+				int(change.get("delta", 0)),
+			])
+		if not growth_lines.is_empty():
+			lines.append("  主要属性：" + "｜".join(growth_lines))
+		elif bool(experience_result.get("at_max_level", false)):
+			lines.append("  满级后不再升级，溢出经验按规则丢弃。")
+		lines.append("")
+	lines.append("待命角色未出战，不获得经验。")
+	return "\n".join(lines)
+
+
+func get_combat_stat_display_name(stat_id: String) -> String:
+	match stat_id:
+		"max_hp":
+			return "生命"
+		"attack":
+			return "攻击"
+		"defense":
+			return "防御"
+		"speed":
+			return "速度"
+	return stat_id
+
+
+func acknowledge_battle_result() -> void:
+	if not result_presentation_active:
+		return
+	var result := presented_battle_result.duplicate(true)
+	result_presentation_active = false
+	presented_battle_result = {}
+	result_overlay.visible = false
+	battle_result_acknowledged.emit(result)
+	refresh()
+
+
+func is_presenting_battle_result() -> bool:
+	return result_presentation_active
 
 
 func refresh_target_highlights() -> void:

@@ -75,7 +75,7 @@ func assert_save_round_trip(game_state: Node) -> void:
 	game_state.resources["food"] = 73
 	var merged: Dictionary = game_state.create_save_data({"future_field": {"preserve_me": true}})
 	require(bool(merged.get("future_field", {}).get("preserve_me", false)), "save merge discarded unknown data")
-	require(int(merged.get("save_version", 0)) == 2, "save version missing")
+	require(int(merged.get("save_version", 0)) == 6, "save version missing")
 	require(game_state.save_game(TEST_SAVE_PATH, {"external_marker": "kept"}), game_state.get_save_error())
 
 	game_state.start_new_game()
@@ -84,7 +84,7 @@ func assert_save_round_trip(game_state: Node) -> void:
 	var hunter: Dictionary = game_state.get_roster_character(&"hunter")
 	require(int(hunter.get("level", 0)) == 3, "level did not round trip")
 	require(int(hunter.get("experience", 0)) == 45, "experience did not round trip")
-	require(int(hunter.get("experience_to_next_level", 0)) == 180, "experience requirement did not round trip")
+	require(int(hunter.get("experience_to_next_level", 0)) == 200, "configured experience requirement did not normalize")
 	var hunter_combat: Dictionary = hunter.get("combat_data", {})
 	require(StringName(hunter_combat.get("equipped_weapon_instance_id", &"")) == &"hunter_bow_01", "equipment binding did not round trip")
 	var life: Dictionary = game_state.get_roster_character(&"life_ahe").get("life_data", {})

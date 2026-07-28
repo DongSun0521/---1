@@ -123,12 +123,22 @@ func process_daily_forge(game_state: Node) -> Dictionary:
 	game_state.forge_state.progress_days = progress_after
 
 	var equipment_instance_id: StringName = &""
+	var equipment_instance_ids: Array[StringName] = []
 	if completed:
 		game_state.forge_state.is_completed = true
-		equipment_instance_id = game_state.equipment_system.add_equipment(game_state, recipe.result_equipment_id)
+		var output_amount: int = game_state.calculate_building_production_output(
+			&"weapon_forge", 1
+		)
+		for _index: int in range(output_amount):
+			var created_id: StringName = game_state.equipment_system.add_equipment(
+				game_state, recipe.result_equipment_id
+			)
+			if created_id != &"":
+				equipment_instance_ids.append(created_id)
+		equipment_instance_id = equipment_instance_ids[0] if not equipment_instance_ids.is_empty() else &""
 		game_state.forge_state.clear()
 
-	return _make_report(
+	var report := _make_report(
 		game_state,
 		recipe_id,
 		true,
@@ -137,6 +147,18 @@ func process_daily_forge(game_state: Node) -> Dictionary:
 		progress_before,
 		min(progress_after, required_days)
 	)
+	report["equipment_instance_ids"] = equipment_instance_ids.duplicate()
+	report["output_amount"] = equipment_instance_ids.size() if completed else 0
+	report["work_experience_results"] = []
+	if completed:
+		report["work_experience_results"] = game_state.settle_life_job_work_experience(
+			&"weapon_forge",
+			StringName("weapon_forge_%s_day_%d" % [
+				String(recipe_id), int(game_state.current_day)
+			])
+		)
+		game_state.record_life_work_feedback(&"weapon_forge", report)
+	return report
 
 
 func get_active_summary(game_state: Node) -> String:
@@ -174,6 +196,11 @@ func _make_report(
 		"result_equipment_id": recipe.result_equipment_id if recipe != null else &"",
 		"result_display_name": String(equipment_definition.get("display_name", "")),
 		"equipment_instance_id": equipment_instance_id,
+		"base_output_amount": 1 if completed else 0,
+		"output_amount": game_state.calculate_building_production_output(
+			&"weapon_forge", 1
+		) if completed else 0,
+		"production_details": game_state.get_building_production_details(&"weapon_forge"),
 		"progress_before": progress_before,
 		"progress_after": progress_after,
 		"required_days": int(recipe.craft_time_days) if recipe != null else 0,

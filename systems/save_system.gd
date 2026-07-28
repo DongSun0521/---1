@@ -1,7 +1,7 @@
 class_name SaveSystem
 extends RefCounted
 
-const CURRENT_SAVE_VERSION := 2
+const CURRENT_SAVE_VERSION := 6
 const DEFAULT_SAVE_PATH := "user://adventure_village_save.json"
 
 const EquipmentInstanceScript := preload("res://scripts/data/equipment_instance.gd")
@@ -15,6 +15,7 @@ var last_error: String = ""
 
 func create_save_data(game_state: Node, base_data: Dictionary = {}) -> Dictionary:
 	# Merge into a caller-provided envelope so future migrations do not discard unknown fields.
+	game_state.sync_all_building_jobs_to_levels(false)
 	var data := base_data.duplicate(true)
 	data["save_version"] = CURRENT_SAVE_VERSION
 	data["current_day"] = game_state.current_day
@@ -39,6 +40,14 @@ func create_save_data(game_state: Node, base_data: Dictionary = {}) -> Dictionar
 	data["food_production_state"] = game_state.food_production_state.to_dictionary() if game_state.food_production_state != null else {}
 	data["forge_state"] = game_state.forge_state.to_dictionary() if game_state.forge_state != null else {}
 	data["hospital_project_state"] = game_state.hospital_project_state.to_dictionary() if game_state.hospital_project_state != null else {}
+	data["life_work_settlement_keys"] = game_state.life_work_settlement_keys.duplicate(true)
+	data["life_recruitment_state"] = game_state.get_life_recruitment_state_for_save()
+	data["stage12_config_version"] = game_state.get_stage12_balance_config().get(
+		"config_version", 1
+	)
+	data["gameplay_notifications"] = game_state.gameplay_notifications.duplicate(true)
+	data["recent_life_work_results_by_building"] = game_state.recent_life_work_results_by_building.duplicate(true)
+	data["next_gameplay_notification_sequence"] = game_state.next_gameplay_notification_sequence
 	return data
 
 
@@ -59,6 +68,14 @@ func load_save_data(game_state: Node, data: Dictionary) -> bool:
 			game_state.character_roster.apply_legacy_runtime_states(data.get("character_runtime_states", {}))
 	# Version 2 adds deterministic growth configuration and normalized party slots.
 	game_state.character_roster.ensure_stage12b_defaults(previous_save_version)
+	# Version 3 adds life traits and building job slots while retaining CharacterRoster as the role source.
+	game_state.character_roster.ensure_stage12c_defaults(previous_save_version)
+	# Version 4 normalizes life progression, caps life stats, and mirrors legacy work experience.
+	game_state.character_roster.ensure_stage12d_defaults(previous_save_version)
+	# Version 5 adds life recruitment candidates, formal lock state, and stable creation order.
+	game_state.character_roster.ensure_stage12e_defaults(previous_save_version)
+	# Version 6 adds portrait fallback, configurable level caps, and strict progression bounds.
+	game_state.character_roster.ensure_stage12f_defaults(previous_save_version)
 	game_state.character_runtime_states = game_state.character_roster.create_combat_runtime_adapter()
 
 	_apply_dictionary_field(game_state, "resources", data)
@@ -70,6 +87,8 @@ func load_save_data(game_state: Node, data: Dictionary) -> bool:
 	_apply_dictionary_field(game_state, "battle_state", data)
 	_apply_dictionary_field(game_state, "pending_battle_result", data)
 	_apply_dictionary_field(game_state, "last_battle_result", data)
+	game_state.life_work_settlement_keys = {}
+	_apply_dictionary_field(game_state, "life_work_settlement_keys", data)
 	if data.has("current_day"):
 		game_state.current_day = max(1, int(data.get("current_day", 1)))
 	if data.has("party_attack_bonus"):
@@ -92,8 +111,18 @@ func load_save_data(game_state: Node, data: Dictionary) -> bool:
 		game_state.forge_state = _restore_forge_state(data.get("forge_state", {}))
 	if data.has("hospital_project_state"):
 		game_state.hospital_project_state = _restore_hospital_state(data.get("hospital_project_state", {}))
+	_sanitize_loaded_runtime_state(game_state)
 
-	game_state.building_system.ensure_initial_runtime_state(game_state)
+	var recruitment_state: Dictionary = {}
+	if data.has("life_recruitment_state") and data.get("life_recruitment_state") is Dictionary:
+		recruitment_state = data.get("life_recruitment_state", {})
+	game_state.normalize_life_recruitment_state(recruitment_state)
+	game_state.normalize_stage12f_feedback_state(
+		data.get("gameplay_notifications", []),
+		data.get("recent_life_work_results_by_building", {}),
+		data.get("next_gameplay_notification_sequence", 1)
+	)
+	game_state.sync_all_building_jobs_to_levels(false)
 	game_state.rebuild_adventurers_from_character_data(false)
 	game_state.emit_full_state_refresh_after_load()
 	return true
@@ -228,3 +257,25 @@ func _apply_dictionary_field(game_state: Node, property_name: String, data: Dict
 	if not data.has(property_name) or not data[property_name] is Dictionary:
 		return
 	game_state.set(property_name, data[property_name].duplicate(true))
+
+
+func _sanitize_loaded_runtime_state(game_state: Node) -> void:
+	for resource_id in game_state.resources.keys():
+		game_state.resources[resource_id] = maxi(0, int(game_state.resources[resource_id]))
+	for item_id in game_state.stackable_item_inventory.keys():
+		game_state.stackable_item_inventory[item_id] = maxi(
+			0, int(game_state.stackable_item_inventory[item_id])
+		)
+	for snapshot: Dictionary in game_state.get_all_combat_characters():
+		var character_id := StringName(snapshot.get("character_id", &""))
+		game_state.clamp_character_runtime_hp_to_final_max(character_id)
+	for property_name: String in ["pending_battle_result", "last_battle_result"]:
+		var result = game_state.get(property_name)
+		if not result is Dictionary:
+			game_state.set(property_name, {})
+			continue
+		if not result.is_empty() and (
+			not result.has("outcome")
+			or not result.get("party_states", []) is Array
+		):
+			game_state.set(property_name, {})

@@ -1,6 +1,8 @@
 class_name LifeStats
 extends Resource
 
+const Stage12Config := preload("res://scripts/data/stage12_balance_config.gd")
+
 @export var farming: int = 0
 @export var smithing: int = 0
 @export var cooking: int = 0
@@ -9,6 +11,15 @@ extends Resource
 @export var gathering: int = 0
 @export var crafting: int = 0
 @export var medical: int = 0
+
+const CORE_STAT_IDS: Array[StringName] = [
+	&"farming",
+	&"crafting",
+	&"gathering",
+	&"research",
+	&"medical",
+]
+const CORE_STAT_CAP := Stage12Config.LIFE_STAT_MAX
 
 
 func setup(
@@ -66,6 +77,42 @@ func to_core_dictionary() -> Dictionary:
 	}
 
 
+func get_core_stat(stat_id: StringName) -> int:
+	return int(to_core_dictionary().get(String(stat_id), 0))
+
+
+func set_core_stat(stat_id: StringName, value: int) -> bool:
+	var normalized := clampi(value, 0, CORE_STAT_CAP)
+	match stat_id:
+		&"farming":
+			farming = normalized
+		&"crafting":
+			crafting = normalized
+			smithing = normalized
+		&"gathering":
+			gathering = normalized
+		&"research":
+			research = normalized
+		&"medical":
+			medical = normalized
+			medicine = normalized
+		_:
+			return false
+	return true
+
+
+func increase_core_stat(stat_id: StringName, amount: int) -> int:
+	var old_value := get_core_stat(stat_id)
+	if not set_core_stat(stat_id, old_value + max(0, amount)):
+		return 0
+	return get_core_stat(stat_id) - old_value
+
+
+func clamp_core_stats() -> void:
+	for stat_id: StringName in CORE_STAT_IDS:
+		set_core_stat(stat_id, get_core_stat(stat_id))
+
+
 static func from_dictionary(data: Dictionary) -> LifeStats:
 	var parsed_crafting := int(data.get("crafting", data.get("smithing", 0)))
 	var parsed_medical := int(data.get("medical", data.get("medicine", 0)))
@@ -79,4 +126,5 @@ static func from_dictionary(data: Dictionary) -> LifeStats:
 	result.smithing = int(data.get("smithing", parsed_crafting))
 	result.cooking = int(data.get("cooking", 0))
 	result.medicine = int(data.get("medicine", parsed_medical))
+	result.clamp_core_stats()
 	return result

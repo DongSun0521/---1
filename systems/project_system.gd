@@ -155,6 +155,7 @@ func _apply_project_completion(game_state: Node, project_id: StringName) -> Stri
 			game_state.set_building_level(&"farm", 2)
 			return "农田升到2级，解锁第4块地。"
 		&"hospital_expansion":
+			game_state.set_building_level(&"hospital", 2)
 			var clinic: Dictionary = game_state.buildings.get("clinic", {})
 			clinic["level"] = 2
 			clinic["medicine_progress"] = 0

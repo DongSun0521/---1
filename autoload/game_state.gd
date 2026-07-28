@@ -52,6 +52,17 @@ signal character_injury_changed(character_id: StringName, injury_state: StringNa
 signal character_treatment_started(character_id: StringName)
 signal character_treatment_completed(character_id: StringName)
 signal character_roster_changed
+signal life_job_assignments_changed(building_id: StringName)
+signal life_character_experience_changed(character_id: StringName, experience: int, required: int)
+signal life_character_leveled_up(character_id: StringName, new_level: int, growth_by_stat: Dictionary)
+signal life_work_settled(building_id: StringName, results: Array)
+signal life_recruitment_candidates_changed
+signal life_character_recruited(character_id: StringName)
+signal life_character_dismissed(character_id: StringName)
+signal life_character_lock_changed(character_id: StringName, is_locked: bool)
+signal life_character_capacity_changed(current_count: int, capacity: int)
+signal gameplay_notification_added(notification: Dictionary)
+signal life_work_feedback_changed(building_id: StringName, feedback: Dictionary)
 
 const VillageSystemScript := preload("res://systems/village_system.gd")
 const ExpeditionSystemScript := preload("res://systems/expedition_system.gd")
@@ -67,11 +78,19 @@ const HospitalSystemScript := preload("res://systems/hospital_system.gd")
 const DailyReportScript := preload("res://scripts/data/daily_report.gd")
 const CharacterRosterScript := preload("res://systems/character_roster.gd")
 const SaveSystemScript := preload("res://systems/save_system.gd")
+const CharacterEnumsScript := preload("res://scripts/data/character_enums.gd")
+const LifeTraitDatabaseScript := preload("res://scripts/data/life_trait_database.gd")
+const LifeStatsScript := preload("res://scripts/data/life_stats.gd")
+const LifeRecruitmentSystemScript := preload("res://systems/life_recruitment_system.gd")
+const Stage12Config := preload("res://scripts/data/stage12_balance_config.gd")
 
 const INITIAL_DAY := 1
-const BATTLE_EXPERIENCE_NORMAL := 40
-const BATTLE_EXPERIENCE_BOSS := 100
-const BATTLE_EXPERIENCE_DEFEAT := 10
+const BATTLE_EXPERIENCE_NORMAL := Stage12Config.BATTLE_EXPERIENCE_REWARDS["normal_victory"]
+const BATTLE_EXPERIENCE_BOSS := Stage12Config.BATTLE_EXPERIENCE_REWARDS["boss_victory"]
+const BATTLE_EXPERIENCE_DEFEAT := Stage12Config.BATTLE_EXPERIENCE_REWARDS["defeat"]
+const LIFE_JOB_STAT_BONUS_PER_POINT := Stage12Config.LIFE_JOB_STAT_BONUS_PER_POINT
+const LIFE_JOB_PREVIEW_STAT_CAP := LifeStatsScript.CORE_STAT_CAP
+const LIFE_WORK_BASE_EXPERIENCE := Stage12Config.LIFE_WORK_BASE_EXPERIENCE
 const INITIAL_RESOURCES := {
 	"food": 20,
 	"medicine": 3,
@@ -166,6 +185,8 @@ var forge_system: RefCounted = ForgeSystemScript.new()
 var food_workshop_system: RefCounted = FoodWorkshopSystemScript.new()
 var hospital_system: RefCounted = HospitalSystemScript.new()
 var character_roster: CharacterRoster = CharacterRosterScript.new()
+var life_trait_database: RefCounted = LifeTraitDatabaseScript.new()
+var life_recruitment_system: RefCounted = LifeRecruitmentSystemScript.new()
 var save_system: SaveSystem = SaveSystemScript.new()
 var expedition_state: Dictionary = {}
 var last_expedition_action_report: Dictionary = {}
@@ -190,6 +211,12 @@ var core_material: int = 0
 var mvp_has_completed: bool = false
 var statistics: Dictionary = {}
 var farm_plot_states: Array = []
+var life_work_settlement_keys: Dictionary = {}
+var life_recruitment_state: Dictionary = {}
+var gameplay_notifications: Array = []
+var recent_life_work_results_by_building: Dictionary = {}
+var next_gameplay_notification_sequence: int = 1
+var last_operation_feedback: Dictionary = {}
 
 
 func _ready() -> void:
@@ -204,11 +231,17 @@ func start_new_game() -> void:
 	farm_plot_states = farm_system.create_initial_plot_states(int(buildings.get("farm", {}).get("level", 1)))
 	project_state = project_system.create_initial_state()
 	character_roster.initialize_defaults(character_database)
+	life_recruitment_system.initialize_new_game(self)
 	character_runtime_states = character_roster.create_combat_runtime_adapter()
 	equipment_inventory = equipment_system.create_initial_inventory_state()
 	forge_state = forge_system.create_initial_state()
 	food_production_state = food_workshop_system.create_initial_state()
 	hospital_project_state = hospital_system.create_initial_state()
+	life_work_settlement_keys = {}
+	gameplay_notifications = []
+	recent_life_work_results_by_building = {}
+	next_gameplay_notification_sequence = 1
+	last_operation_feedback = {}
 	stackable_item_inventory = INITIAL_STACKABLE_ITEMS.duplicate(true)
 	last_forge_report = {}
 	last_food_workshop_report = {}
@@ -252,6 +285,8 @@ func start_new_game() -> void:
 	hospital_state_changed.emit()
 	emit_all_stackable_item_count_changed()
 	character_roster_changed.emit()
+	life_recruitment_candidates_changed.emit()
+	_emit_life_character_capacity_changed()
 	expedition_meal_changed.emit(&"")
 	daily_report_generated.emit(last_daily_report.duplicate(true))
 	state_changed.emit()
@@ -325,6 +360,220 @@ func add_resource(resource_id: String, amount: int) -> void:
 
 func get_resource_display_name(resource_id: String) -> String:
 	return String(RESOURCE_LABELS.get(resource_id, resource_id))
+
+
+func get_stage12_balance_config() -> Dictionary:
+	return {
+		"config_version": Stage12Config.CONFIG_VERSION,
+		"min_party_size": Stage12Config.MIN_PARTY_SIZE,
+		"max_party_size": Stage12Config.MAX_PARTY_SIZE,
+		"combat_max_level": Stage12Config.COMBAT_MAX_LEVEL,
+		"life_max_level": Stage12Config.LIFE_MAX_LEVEL,
+		"battle_experience_rewards": Stage12Config.BATTLE_EXPERIENCE_REWARDS.duplicate(true),
+		"combat_experience_base": Stage12Config.COMBAT_EXPERIENCE_BASE,
+		"combat_experience_step": Stage12Config.COMBAT_EXPERIENCE_STEP,
+		"combat_level_growth_by_character":
+			Stage12Config.COMBAT_LEVEL_GROWTH_BY_CHARACTER.duplicate(true),
+		"life_experience_base": Stage12Config.LIFE_EXPERIENCE_BASE,
+		"life_experience_step": Stage12Config.LIFE_EXPERIENCE_STEP,
+		"life_work_base_experience": Stage12Config.LIFE_WORK_BASE_EXPERIENCE,
+		"life_stat_growth_per_level": Stage12Config.LIFE_STAT_GROWTH_PER_LEVEL,
+		"life_stat_min": Stage12Config.LIFE_STAT_MIN,
+		"life_stat_cap": Stage12Config.LIFE_STAT_MAX,
+		"life_job_stat_bonus_per_point": Stage12Config.LIFE_JOB_STAT_BONUS_PER_POINT,
+		"crit_rate_min": Stage12Config.COMBAT_CRIT_RATE_MIN,
+		"crit_rate_max": Stage12Config.COMBAT_CRIT_RATE_MAX,
+		"crit_damage_min": Stage12Config.COMBAT_CRIT_DAMAGE_MIN,
+		"crit_damage_max": Stage12Config.COMBAT_CRIT_DAMAGE_MAX,
+		"candidate_count": Stage12Config.CANDIDATE_COUNT,
+		"quality_probabilities": Stage12Config.QUALITY_PROBABILITIES.duplicate(true),
+		"quality_attribute_ranges": Stage12Config.QUALITY_ATTRIBUTE_RANGES.duplicate(true),
+		"recruit_cost_by_quality": Stage12Config.RECRUIT_COST_BY_QUALITY.duplicate(true),
+		"refresh_cost": Stage12Config.RECRUITMENT_REFRESH_COST,
+		"base_life_capacity": Stage12Config.BASE_LIFE_CAPACITY,
+		"capacity_per_residence_level": Stage12Config.CAPACITY_PER_RESIDENCE_LEVEL,
+		"job_slot_count_by_level":
+			Stage12Config.DEFAULT_JOB_SLOT_COUNT_BY_LEVEL.duplicate(true),
+		"job_config_by_building": Stage12Config.JOB_CONFIG_BY_BUILDING.duplicate(true),
+		"life_trait_config": Stage12Config.LIFE_TRAIT_CONFIG.duplicate(true),
+		"default_life_portrait_path": Stage12Config.DEFAULT_LIFE_PORTRAIT_PATH,
+		"life_portrait_paths": Stage12Config.LIFE_PORTRAIT_PATHS.duplicate(),
+	}
+
+
+func push_gameplay_notification(
+	message: String,
+	category: StringName = &"info",
+	context: Dictionary = {}
+) -> Dictionary:
+	var normalized_message := message.strip_edges()
+	if normalized_message.is_empty():
+		return {}
+	var notification := {
+		"notification_id": next_gameplay_notification_sequence,
+		"day": current_day,
+		"category": category,
+		"message": normalized_message,
+		"context": context.duplicate(true),
+	}
+	next_gameplay_notification_sequence += 1
+	gameplay_notifications.append(notification)
+	while gameplay_notifications.size() > Stage12Config.MAX_GAMEPLAY_NOTIFICATIONS:
+		gameplay_notifications.pop_front()
+	last_operation_feedback = notification.duplicate(true)
+	gameplay_notification_added.emit(notification.duplicate(true))
+	return notification
+
+
+func get_gameplay_notifications(limit: int = Stage12Config.MAX_GAMEPLAY_NOTIFICATIONS) -> Array:
+	var result: Array = []
+	var start_index := maxi(0, gameplay_notifications.size() - maxi(0, limit))
+	for index: int in range(start_index, gameplay_notifications.size()):
+		result.append(gameplay_notifications[index].duplicate(true))
+	return result
+
+
+func get_last_operation_feedback() -> Dictionary:
+	return last_operation_feedback.duplicate(true)
+
+
+func normalize_stage12f_feedback_state(
+	raw_notifications,
+	raw_work_results,
+	raw_next_sequence
+) -> void:
+	gameplay_notifications = []
+	recent_life_work_results_by_building = {}
+	var highest_sequence := 0
+	if raw_notifications is Array:
+		for raw_notification in raw_notifications:
+			if not raw_notification is Dictionary:
+				continue
+			var message := String(raw_notification.get("message", "")).strip_edges()
+			if message.is_empty():
+				continue
+			var sequence := maxi(1, int(raw_notification.get(
+				"notification_id", highest_sequence + 1
+			)))
+			highest_sequence = maxi(highest_sequence, sequence)
+			gameplay_notifications.append({
+				"notification_id": sequence,
+				"day": maxi(1, int(raw_notification.get("day", current_day))),
+				"category": StringName(raw_notification.get("category", &"info")),
+				"message": message,
+				"context": raw_notification.get("context", {}).duplicate(true)
+					if raw_notification.get("context", {}) is Dictionary else {},
+			})
+			if gameplay_notifications.size() >= Stage12Config.MAX_GAMEPLAY_NOTIFICATIONS:
+				break
+	if raw_work_results is Dictionary:
+		for raw_building_id in raw_work_results.keys():
+			var building_id := StringName(raw_building_id)
+			var feedback = raw_work_results[raw_building_id]
+			if get_building_data(building_id) == null or not feedback is Dictionary:
+				continue
+			var results = feedback.get("work_experience_results", [])
+			if not results is Array:
+				continue
+			var normalized_feedback: Dictionary = feedback.duplicate(true)
+			normalized_feedback["building_id"] = building_id
+			normalized_feedback["work_experience_results"] = results.duplicate(true)
+			recent_life_work_results_by_building[building_id] = normalized_feedback
+	next_gameplay_notification_sequence = maxi(
+		highest_sequence + 1, maxi(1, int(raw_next_sequence))
+	)
+	last_operation_feedback = (
+		gameplay_notifications.back().duplicate(true)
+		if not gameplay_notifications.is_empty() else {}
+	)
+
+
+func record_life_work_feedback(building_id: StringName, report: Dictionary) -> Dictionary:
+	var results = report.get(
+		"work_experience_results",
+		report.get("farm_work_experience_results", [])
+	)
+	if not results is Array or results.is_empty():
+		return {}
+	var production_details: Dictionary = report.get(
+		"production_details",
+		report.get("farm_production_details", get_building_production_details(building_id))
+	)
+	var participant_results: Array = []
+	for raw_result in results:
+		if not raw_result is Dictionary:
+			continue
+		var result: Dictionary = raw_result.duplicate(true)
+		var character_id := StringName(result.get("character_id", &""))
+		result["display_name"] = get_character_display_name(character_id)
+		participant_results.append(result)
+	var base_output := int(report.get("base_output_amount", 0))
+	var output_amount := int(report.get(
+		"output_amount",
+		report.get("medicine_produced", report.get("farm_food_produced", 0))
+	))
+	if building_id == &"farm":
+		base_output = 0
+		output_amount = 0
+		for harvest in report.get("farm_harvests", []):
+			if not harvest is Dictionary:
+				continue
+			base_output += int(harvest.get("base_output_amount", 0))
+			output_amount += int(harvest.get("output_amount", 0))
+	var building_data = get_building_data(building_id)
+	var feedback := {
+		"building_id": building_id,
+		"building_display_name": String(building_data.display_name)
+			if building_data != null else String(building_id),
+		"day": current_day,
+		"work_experience_results": participant_results,
+		"final_production_multiplier": float(
+			production_details.get("final_production_multiplier", 1.0)
+		),
+		"base_output_amount": base_output,
+		"output_amount": output_amount,
+		"extra_output_amount": maxi(0, output_amount - base_output),
+		"treatment_completed": bool(report.get("treatment_completed", false)),
+		"effect_text": String(report.get("effect_text", "")),
+	}
+	recent_life_work_results_by_building[building_id] = feedback
+	var participant_names := PackedStringArray()
+	for result: Dictionary in participant_results:
+		participant_names.append(String(result.get("display_name", "")))
+	var summary := "%s工作完成：%s获得成长反馈。" % [
+		String(feedback["building_display_name"]),
+		"、".join(participant_names),
+	]
+	push_gameplay_notification(summary, &"work", {
+		"building_id": building_id,
+		"character_ids": participant_results.map(
+			func(result: Dictionary): return result.get("character_id", &"")
+		),
+	})
+	life_work_feedback_changed.emit(building_id, feedback.duplicate(true))
+	return feedback.duplicate(true)
+
+
+func get_recent_life_work_feedback(building_id: StringName) -> Dictionary:
+	return recent_life_work_results_by_building.get(building_id, {}).duplicate(true)
+
+
+func get_character_portrait_path(character_id: StringName) -> String:
+	var snapshot := get_roster_character(character_id)
+	if snapshot.is_empty():
+		return Stage12Config.DEFAULT_LIFE_PORTRAIT_PATH
+	if StringName(snapshot.get("character_type_name", &"")) == &"life":
+		return Stage12Config.resolve_life_portrait_path(
+			String(snapshot.get("portrait_path", ""))
+		)
+	return String(snapshot.get("portrait_path", ""))
+
+
+func get_candidate_portrait_path(candidate: Dictionary) -> String:
+	var character: Dictionary = candidate.get("character", {})
+	return Stage12Config.resolve_life_portrait_path(
+		String(character.get("portrait_path", candidate.get("portrait_path", "")))
+	)
 
 
 func get_item_display_name(item_id: StringName) -> String:
@@ -606,12 +855,20 @@ func get_all_building_data() -> Array:
 func set_building_level(building_id: StringName, level: int) -> bool:
 	if not building_system.set_building_level(self, building_id, level):
 		return false
+	var sync_result := sync_building_jobs_to_level(building_id, false)
 	if building_id == &"farm":
 		farm_system.apply_farm_level(self, level)
 		farm_state_changed.emit()
+	for raw_character_id in sync_result.get("repaired_character_ids", []):
+		character_data_changed.emit(StringName(raw_character_id))
+	if not sync_result.get("repaired_character_ids", []).is_empty():
+		character_roster_changed.emit()
+	life_job_assignments_changed.emit(building_id)
 	building_level_changed.emit(building_id, level)
 	building_state_changed.emit(building_id)
 	building_visual_refresh_requested.emit(building_id)
+	if building_id == &"residence":
+		_emit_life_character_capacity_changed()
 	state_changed.emit()
 	return true
 
@@ -1189,6 +1446,9 @@ func complete_pending_battle_result() -> bool:
 
 
 func process_battle_result(result: Dictionary) -> void:
+	if bool(result.get("stage12f_result_processed", false)):
+		last_battle_result = result.duplicate(true)
+		return
 	_grant_battle_result_experience(result)
 	last_battle_result = result.duplicate(true)
 	if String(result["outcome"]) == "victory":
@@ -1216,6 +1476,8 @@ func process_battle_result(result: Dictionary) -> void:
 		expedition_ended.emit(report.duplicate(true))
 
 	battle_state_changed.emit()
+	result["stage12f_result_processed"] = true
+	last_battle_result = result.duplicate(true)
 	battle_finished.emit(result.duplicate(true))
 	state_changed.emit()
 
@@ -1258,27 +1520,51 @@ func can_edit_party() -> bool:
 
 func set_party_members(character_ids: Array) -> bool:
 	if not can_edit_party():
+		push_gameplay_notification("远征或战斗期间不能调整队伍。", &"error")
 		return false
 	var typed_ids: Array[StringName] = []
 	for raw_id in character_ids:
 		typed_ids.append(StringName(raw_id))
 	if not character_roster.set_party_members(typed_ids):
+		push_gameplay_notification("队伍调整失败：队伍必须保持1～4名且角色不能重复。", &"error")
 		return false
 	_after_party_changed()
+	push_gameplay_notification("队伍编成已更新。", &"party")
 	return true
 
 
 func set_character_party_status(character_id: StringName, is_in_party: bool) -> bool:
-	if not can_edit_party() or not character_roster.set_character_party_status(character_id, is_in_party):
+	if not can_edit_party():
+		push_gameplay_notification("远征或战斗期间不能调整队伍。", &"error")
+		return false
+	if not character_roster.set_character_party_status(character_id, is_in_party):
+		push_gameplay_notification(
+			"编队失败：队伍必须保持1～4名且不能重复加入。",
+			&"error",
+			{"character_id": character_id}
+		)
 		return false
 	_after_party_changed()
+	push_gameplay_notification(
+		"%s已%s。" % [
+			get_character_display_name(character_id),
+			"加入出战" if is_in_party else "设为待命",
+		],
+		&"party",
+		{"character_id": character_id}
+	)
 	return true
 
 
 func move_party_character(character_id: StringName, target_slot: int) -> bool:
-	if not can_edit_party() or not character_roster.move_party_character(character_id, target_slot):
+	if not can_edit_party():
+		push_gameplay_notification("远征或战斗期间不能调整队伍。", &"error")
+		return false
+	if not character_roster.move_party_character(character_id, target_slot):
+		push_gameplay_notification("队伍位置调整失败：目标位置无效。", &"error")
 		return false
 	_after_party_changed()
+	push_gameplay_notification("队伍顺序已调整。", &"party")
 	return true
 
 
@@ -1297,6 +1583,774 @@ func get_all_life_characters() -> Array:
 	return character_roster.get_life_character_snapshots()
 
 
+func get_filtered_sorted_life_characters(
+	filter_id: StringName = &"all",
+	sort_id: StringName = &"created"
+) -> Array:
+	var filtered: Array = []
+	for snapshot: Dictionary in get_all_life_characters():
+		if _life_character_matches_filter(snapshot, filter_id):
+			filtered.append(snapshot)
+	filtered.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var a_value = _get_life_character_sort_value(a, sort_id)
+		var b_value = _get_life_character_sort_value(b, sort_id)
+		if a_value == b_value:
+			return int(a.get("created_sequence", 0)) < int(b.get("created_sequence", 0))
+		if sort_id == &"created":
+			return int(a_value) < int(b_value)
+		return int(a_value) > int(b_value)
+	)
+	return filtered
+
+
+func get_life_character_filter_options() -> Array:
+	return [
+		{"filter_id": &"all", "display_name": "全部"},
+		{"filter_id": &"idle", "display_name": "空闲"},
+		{"filter_id": &"working", "display_name": "工作中"},
+		{"filter_id": &"farming", "display_name": "擅长农业"},
+		{"filter_id": &"crafting", "display_name": "擅长制造"},
+		{"filter_id": &"gathering", "display_name": "擅长采集"},
+		{"filter_id": &"research", "display_name": "擅长研究"},
+		{"filter_id": &"medical", "display_name": "擅长医疗"},
+	]
+
+
+func get_life_character_sort_options() -> Array:
+	return [
+		{"sort_id": &"created", "display_name": "创建顺序"},
+		{"sort_id": &"level", "display_name": "等级"},
+		{"sort_id": &"quality", "display_name": "品质"},
+		{"sort_id": &"farming", "display_name": "农业"},
+		{"sort_id": &"crafting", "display_name": "制造"},
+		{"sort_id": &"gathering", "display_name": "采集"},
+		{"sort_id": &"research", "display_name": "研究"},
+		{"sort_id": &"medical", "display_name": "医疗"},
+	]
+
+
+func get_idle_life_characters() -> Array:
+	var result: Array = []
+	for snapshot: Dictionary in get_all_life_characters():
+		var life_data: Dictionary = snapshot.get("life_data", {})
+		if int(life_data.get("work_state", CharacterEnumsScript.WorkState.IDLE)) != CharacterEnumsScript.WorkState.IDLE:
+			continue
+		if StringName(life_data.get("assigned_building_id", &"")) != &"":
+			continue
+		if StringName(life_data.get("assigned_job_id", &"")) != &"":
+			continue
+		result.append(snapshot)
+	return result
+
+
+func get_building_jobs(building_id: StringName) -> Array:
+	return building_system.get_building_jobs(self, building_id)
+
+
+func get_building_job_slot_count_config(building_id: StringName) -> Dictionary:
+	return building_system.get_job_slot_count_config(building_id)
+
+
+func sync_building_jobs_to_level(
+	building_id: StringName,
+	emit_signals: bool = true
+) -> Dictionary:
+	var sync_result: Dictionary = building_system.sync_runtime_jobs_for_building(
+		self, building_id
+	)
+	if not bool(sync_result.get("success", false)):
+		return sync_result
+	var reconciliation := reconcile_life_job_assignments(false)
+	var repaired_character_ids: Array = reconciliation.get(
+		"repaired_character_ids", []
+	).duplicate()
+	for raw_character_id in sync_result.get("removed_character_ids", []):
+		var character_id := StringName(raw_character_id)
+		if character_id != &"" and not repaired_character_ids.has(character_id):
+			repaired_character_ids.append(character_id)
+	sync_result["repaired_character_ids"] = repaired_character_ids
+	sync_result["cleared_job_count"] = int(reconciliation.get("cleared_job_count", 0))
+	if emit_signals and (
+		bool(sync_result.get("job_count_changed", false))
+		or not repaired_character_ids.is_empty()
+	):
+		_emit_life_job_changes(repaired_character_ids, [building_id])
+	return sync_result
+
+
+func sync_all_building_jobs_to_levels(emit_signals: bool = true) -> Dictionary:
+	var changed_building_ids: Array[StringName] = []
+	var removed_character_ids: Array[StringName] = []
+	for building_id: StringName in get_building_ids():
+		var sync_result: Dictionary = building_system.sync_runtime_jobs_for_building(
+			self, building_id
+		)
+		if bool(sync_result.get("job_count_changed", false)):
+			changed_building_ids.append(building_id)
+		for raw_character_id in sync_result.get("removed_character_ids", []):
+			var character_id := StringName(raw_character_id)
+			if character_id != &"" and not removed_character_ids.has(character_id):
+				removed_character_ids.append(character_id)
+	var reconciliation := reconcile_life_job_assignments(false)
+	var repaired_character_ids: Array = reconciliation.get(
+		"repaired_character_ids", []
+	).duplicate()
+	for character_id: StringName in removed_character_ids:
+		if not repaired_character_ids.has(character_id):
+			repaired_character_ids.append(character_id)
+	for raw_building_id in reconciliation.get("changed_building_ids", []):
+		var repaired_building_id := StringName(raw_building_id)
+		if not changed_building_ids.has(repaired_building_id):
+			changed_building_ids.append(repaired_building_id)
+	if emit_signals and (
+		not changed_building_ids.is_empty()
+		or not repaired_character_ids.is_empty()
+	):
+		_emit_life_job_changes(repaired_character_ids, changed_building_ids)
+	return {
+		"changed_building_ids": changed_building_ids,
+		"repaired_character_ids": repaired_character_ids,
+		"cleared_job_count": int(reconciliation.get("cleared_job_count", 0)),
+	}
+
+
+func get_building_assigned_characters(building_id: StringName) -> Array:
+	var result: Array = []
+	for job: Dictionary in get_building_jobs(building_id):
+		var character_id := StringName(job.get("character_id", &""))
+		if character_id == &"":
+			continue
+		var entry := job.duplicate(true)
+		entry["character"] = get_roster_character(character_id)
+		result.append(entry)
+	return result
+
+
+func assign_life_character_to_job(character_id: StringName, building_id: StringName, job_id: StringName) -> bool:
+	var record = character_roster.get_character(character_id)
+	var job: Dictionary = building_system.get_building_job(self, building_id, job_id)
+	if record == null or not record.is_life_character() or job.is_empty():
+		push_gameplay_notification("岗位分配失败：角色或岗位不存在。", &"error")
+		return false
+	if record.life_data.work_state == CharacterEnumsScript.WorkState.UNAVAILABLE:
+		push_gameplay_notification("岗位分配失败：角色当前不可用。", &"error")
+		return false
+	var existing_references: Array = building_system.get_character_job_references(self, character_id)
+	if not existing_references.is_empty():
+		var existing: Dictionary = existing_references[0]
+		if existing_references.size() == 1 \
+				and StringName(existing.get("building_id", &"")) == building_id \
+				and StringName(existing.get("job_id", &"")) == job_id:
+			character_roster.set_life_assignment(
+				character_id, building_id, job_id, CharacterEnumsScript.WorkState.WORKING
+			)
+			_emit_life_job_changes([character_id], [building_id])
+			push_gameplay_notification(
+				"%s已在该岗位工作，无需重复分配。" % get_character_display_name(character_id),
+				&"job",
+				{"character_id": character_id, "building_id": building_id, "job_id": job_id}
+			)
+			return true
+		push_gameplay_notification("岗位分配失败：角色已在其他岗位工作。", &"error")
+		return false
+	if record.life_data.assigned_building_id != &"" \
+			or record.life_data.assigned_job_id != &"" \
+			or record.life_data.work_state == CharacterEnumsScript.WorkState.WORKING:
+		push_gameplay_notification(
+			"岗位分配失败：角色岗位状态不一致，请先执行撤下。",
+			&"error"
+		)
+		return false
+	if StringName(job.get("character_id", &"")) != &"":
+		push_gameplay_notification("岗位分配失败：岗位已有角色，请使用替换。", &"error")
+		return false
+	if not building_system.set_job_character_id(self, building_id, job_id, character_id):
+		push_gameplay_notification("岗位分配失败：岗位状态已变化。", &"error")
+		return false
+	if not character_roster.set_life_assignment(
+		character_id, building_id, job_id, CharacterEnumsScript.WorkState.WORKING
+	):
+		building_system.set_job_character_id(self, building_id, job_id, &"")
+		push_gameplay_notification("岗位分配失败：角色状态已变化。", &"error")
+		return false
+	_emit_life_job_changes([character_id], [building_id])
+	push_gameplay_notification(
+		"%s岗位分配成功。" % get_character_display_name(character_id),
+		&"job",
+		{"character_id": character_id, "building_id": building_id, "job_id": job_id}
+	)
+	return true
+
+
+func unassign_life_character(character_id: StringName) -> bool:
+	var record = character_roster.get_character(character_id)
+	if record == null or not record.is_life_character():
+		push_gameplay_notification("撤下失败：生活角色不存在。", &"error")
+		return false
+	var changed_buildings: Array[StringName] = building_system.clear_character_job_references(self, character_id)
+	var recorded_building_id: StringName = record.life_data.assigned_building_id
+	if recorded_building_id != &"" and not changed_buildings.has(recorded_building_id):
+		changed_buildings.append(recorded_building_id)
+	if not character_roster.set_life_assignment(
+		character_id, &"", &"", CharacterEnumsScript.WorkState.IDLE
+	):
+		return false
+	_emit_life_job_changes([character_id], changed_buildings)
+	push_gameplay_notification(
+		"%s已从岗位撤下。" % get_character_display_name(character_id),
+		&"job",
+		{"character_id": character_id}
+	)
+	return true
+
+
+func unassign_building_job(building_id: StringName, job_id: StringName) -> bool:
+	var job: Dictionary = building_system.get_building_job(self, building_id, job_id)
+	if job.is_empty():
+		push_gameplay_notification("撤下失败：岗位不存在。", &"error")
+		return false
+	var character_id := StringName(job.get("character_id", &""))
+	if character_id == &"":
+		push_gameplay_notification("撤下失败：岗位当前没有角色。", &"error")
+		return false
+	return unassign_life_character(character_id)
+
+
+func replace_life_character_in_job(
+	building_id: StringName,
+	job_id: StringName,
+	new_character_id: StringName
+) -> bool:
+	var job: Dictionary = building_system.get_building_job(self, building_id, job_id)
+	var new_record = character_roster.get_character(new_character_id)
+	if job.is_empty() or new_record == null or not new_record.is_life_character():
+		push_gameplay_notification("岗位替换失败：角色或岗位不存在。", &"error")
+		return false
+	if new_record.life_data.work_state == CharacterEnumsScript.WorkState.UNAVAILABLE:
+		push_gameplay_notification("岗位替换失败：新角色当前不可用。", &"error")
+		return false
+	var old_character_id := StringName(job.get("character_id", &""))
+	if old_character_id == &"":
+		return assign_life_character_to_job(new_character_id, building_id, job_id)
+	if old_character_id == new_character_id:
+		push_gameplay_notification(
+			"%s已在该岗位工作，无需替换。" % get_character_display_name(new_character_id),
+			&"job"
+		)
+		return true
+	if not building_system.get_character_job_references(self, new_character_id).is_empty():
+		push_gameplay_notification("岗位替换失败：新角色已在其他岗位工作。", &"error")
+		return false
+	if new_record.life_data.assigned_building_id != &"" \
+			or new_record.life_data.assigned_job_id != &"" \
+			or new_record.life_data.work_state == CharacterEnumsScript.WorkState.WORKING:
+		push_gameplay_notification(
+			"岗位替换失败：新角色岗位状态不一致，请先执行撤下。",
+			&"error"
+		)
+		return false
+	if not building_system.set_job_character_id(self, building_id, job_id, new_character_id):
+		push_gameplay_notification("岗位替换失败：岗位状态已变化。", &"error")
+		return false
+	var old_record = character_roster.get_character(old_character_id)
+	if old_record != null and old_record.is_life_character():
+		character_roster.set_life_assignment(
+			old_character_id, &"", &"", CharacterEnumsScript.WorkState.IDLE
+		)
+	if not character_roster.set_life_assignment(
+		new_character_id, building_id, job_id, CharacterEnumsScript.WorkState.WORKING
+	):
+		building_system.set_job_character_id(self, building_id, job_id, old_character_id)
+		if old_record != null and old_record.is_life_character():
+			character_roster.set_life_assignment(
+				old_character_id, building_id, job_id, CharacterEnumsScript.WorkState.WORKING
+			)
+		push_gameplay_notification("岗位替换失败：角色状态已变化。", &"error")
+		return false
+	_emit_life_job_changes([old_character_id, new_character_id], [building_id])
+	push_gameplay_notification(
+		"岗位已由%s替换为%s。" % [
+			get_character_display_name(old_character_id),
+			get_character_display_name(new_character_id),
+		],
+		&"job",
+		{
+			"old_character_id": old_character_id,
+			"character_id": new_character_id,
+			"building_id": building_id,
+			"job_id": job_id,
+		}
+	)
+	return true
+
+
+func get_life_job_efficiency_preview(
+	character_id: StringName,
+	building_id: StringName,
+	job_id: StringName
+) -> Dictionary:
+	return get_life_job_efficiency(character_id, building_id, job_id)
+
+
+func get_life_job_efficiency(
+	character_id: StringName,
+	building_id: StringName,
+	job_id: StringName
+) -> Dictionary:
+	var record = character_roster.get_character(character_id)
+	var job: Dictionary = building_system.get_building_job(self, building_id, job_id)
+	if record == null or not record.is_life_character() or job.is_empty() or record.life_data.life_stats == null:
+		return {"success": false}
+	var job_type := StringName(job.get("job_type", &""))
+	var stat_data: Dictionary = record.life_data.life_stats.to_core_dictionary()
+	var raw_stat_value: int = max(0, int(stat_data.get(String(job_type), 0)))
+	var applied_stat_value: int = mini(raw_stat_value, LIFE_JOB_PREVIEW_STAT_CAP)
+	var stat_bonus_percent := float(applied_stat_value) * LIFE_JOB_STAT_BONUS_PER_POINT
+	var trait_bonuses: Dictionary = life_trait_database.get_bonus_totals(
+		record.life_data.life_trait_ids, job_type
+	)
+	var trait_bonus_percent := float(trait_bonuses.get("efficiency_bonus_percent", 0.0))
+	var efficiency_percent := 100.0 + stat_bonus_percent + trait_bonus_percent
+	return {
+		"success": true,
+		"character_id": character_id,
+		"building_id": building_id,
+		"job_id": job_id,
+		"job_type": job_type,
+		"attribute_id": job_type,
+		"attribute_value": raw_stat_value,
+		"applied_attribute_value": applied_stat_value,
+		"base_percent": 100.0,
+		"attribute_bonus_percent": stat_bonus_percent,
+		"trait_bonus_percent": trait_bonus_percent,
+		"work_experience_bonus_percent": float(
+			trait_bonuses.get("work_experience_bonus_percent", 0.0)
+		),
+		"production_bonus_percent": float(
+			trait_bonuses.get("production_bonus_percent", 0.0)
+		),
+		"applied_trait_ids": trait_bonuses.get("applied_trait_ids", []).duplicate(),
+		"efficiency_percent": efficiency_percent,
+		"efficiency_multiplier": efficiency_percent / 100.0,
+	}
+
+
+func get_building_personnel_efficiency(building_id: StringName) -> Dictionary:
+	var efficiency_total := 0.0
+	var production_bonus_total := 0.0
+	var assigned_count := 0
+	var character_efficiencies: Array = []
+	for job: Dictionary in get_building_jobs(building_id):
+		var character_id := StringName(job.get("character_id", &""))
+		if character_id == &"":
+			continue
+		var record = character_roster.get_character(character_id)
+		var job_id := StringName(job.get("job_id", &""))
+		if record == null \
+				or not record.is_life_character() \
+				or record.life_data.work_state != CharacterEnumsScript.WorkState.WORKING \
+				or record.life_data.assigned_building_id != building_id \
+				or record.life_data.assigned_job_id != job_id:
+			continue
+		var efficiency := get_life_job_efficiency(
+			character_id,
+			building_id,
+			job_id
+		)
+		if not bool(efficiency.get("success", false)):
+			continue
+		assigned_count += 1
+		efficiency_total += float(efficiency.get("efficiency_percent", 100.0))
+		production_bonus_total += float(efficiency.get("production_bonus_percent", 0.0))
+		character_efficiencies.append(efficiency)
+	var personnel_efficiency_percent := 100.0
+	var production_bonus_percent := 0.0
+	if assigned_count > 0:
+		personnel_efficiency_percent = efficiency_total / float(assigned_count)
+		production_bonus_percent = production_bonus_total / float(assigned_count)
+	return {
+		"building_id": building_id,
+		"assigned_count": assigned_count,
+		"personnel_efficiency_percent": personnel_efficiency_percent,
+		"personnel_efficiency_multiplier": personnel_efficiency_percent / 100.0,
+		"production_bonus_percent": production_bonus_percent,
+		"character_efficiencies": character_efficiencies,
+	}
+
+
+func get_building_final_production_multiplier(building_id: StringName) -> float:
+	var details := get_building_personnel_efficiency(building_id)
+	return float(details.get("personnel_efficiency_multiplier", 1.0)) * (
+		1.0 + float(details.get("production_bonus_percent", 0.0)) / 100.0
+	)
+
+
+func get_building_production_details(building_id: StringName) -> Dictionary:
+	var details := get_building_personnel_efficiency(building_id)
+	var final_multiplier := get_building_final_production_multiplier(building_id)
+	details["final_production_multiplier"] = final_multiplier
+	details["final_production_percent"] = final_multiplier * 100.0
+	details["integer_rounding_rule"] = "round_half_up"
+	return details
+
+
+func calculate_building_production_output(building_id: StringName, base_amount: int) -> int:
+	if base_amount <= 0:
+		return 0
+	return int(floor(float(base_amount) * get_building_final_production_multiplier(
+		building_id
+	) + 0.5))
+
+
+func get_life_trait_details(character_id: StringName) -> Array:
+	var record = character_roster.get_character(character_id)
+	var result: Array = []
+	if record == null or not record.is_life_character():
+		return result
+	for trait_id: StringName in record.life_data.life_trait_ids:
+		var definition: Dictionary = life_trait_database.get_definition_data(trait_id)
+		if definition.is_empty():
+			definition = {
+				"trait_id": trait_id,
+				"display_name": String(trait_id),
+				"description": "尚未配置说明。",
+				"applicable_job_types": [],
+				"efficiency_bonus_percent": 0.0,
+				"work_experience_bonus_percent": 0.0,
+				"production_bonus_percent": 0.0,
+			}
+		result.append(definition)
+	return result
+
+
+func get_life_experience_to_next_level(level: int) -> int:
+	return character_roster.get_life_experience_to_next_level(level)
+
+
+func get_combat_max_level() -> int:
+	return Stage12Config.COMBAT_MAX_LEVEL
+
+
+func get_life_max_level() -> int:
+	return Stage12Config.LIFE_MAX_LEVEL
+
+
+func is_character_at_max_level(character_id: StringName) -> bool:
+	var snapshot := get_roster_character(character_id)
+	if snapshot.is_empty():
+		return false
+	var max_level := (
+		Stage12Config.LIFE_MAX_LEVEL
+		if StringName(snapshot.get("character_type_name", &"")) == &"life"
+		else Stage12Config.COMBAT_MAX_LEVEL
+	)
+	return int(snapshot.get("level", 1)) >= max_level
+
+
+func get_character_status_labels(character_id: StringName) -> Array[String]:
+	var snapshot := get_roster_character(character_id)
+	var result: Array[String] = []
+	if snapshot.is_empty():
+		return result
+	if StringName(snapshot.get("character_type_name", &"")) == &"combat":
+		var combat_data: Dictionary = snapshot.get("combat_data", {})
+		result.append(
+			"◆ 出战" if bool(combat_data.get("is_in_party", false)) else "◇ 待命"
+		)
+		if StringName(combat_data.get("injury_state", &"healthy")) == &"injured":
+			result.append("✚ 受伤")
+	else:
+		var work_state := int(snapshot.get("life_data", {}).get(
+			"work_state", CharacterEnumsScript.WorkState.IDLE
+		))
+		match work_state:
+			CharacterEnumsScript.WorkState.WORKING:
+				result.append("● 工作中")
+			CharacterEnumsScript.WorkState.UNAVAILABLE:
+				result.append("× 不可用")
+			_:
+				result.append("○ 空闲")
+	if bool(snapshot.get("is_locked", false)):
+		result.append("■ 已锁定")
+	return result
+
+
+func get_life_character_upgrade_requirement(character_id: StringName) -> int:
+	var record = character_roster.get_character(character_id)
+	if record == null or not record.is_life_character():
+		return 0
+	return character_roster.get_life_experience_to_next_level(record.level)
+
+
+func add_life_character_experience(
+	character_id: StringName,
+	amount: int,
+	emit_signals: bool = true
+) -> Dictionary:
+	var record = character_roster.get_character(character_id)
+	if record == null or not record.is_life_character():
+		return {"success": false, "character_id": character_id, "levels_gained": 0}
+	var preferred_stat_id := &""
+	if record.life_data.assigned_building_id != &"" and record.life_data.assigned_job_id != &"":
+		var job: Dictionary = building_system.get_building_job(
+			self,
+			record.life_data.assigned_building_id,
+			record.life_data.assigned_job_id
+		)
+		preferred_stat_id = StringName(job.get("job_type", &""))
+	var result := character_roster.grant_life_experience(
+		character_id, amount, preferred_stat_id
+	)
+	if not bool(result.get("success", false)) or not emit_signals:
+		return result
+	character_data_changed.emit(character_id)
+	character_roster_changed.emit()
+	life_character_experience_changed.emit(
+		character_id,
+		int(result.get("experience", 0)),
+		int(result.get("experience_to_next_level", 0))
+	)
+	if int(result.get("levels_gained", 0)) > 0:
+		life_character_leveled_up.emit(
+			character_id,
+			int(result.get("new_level", 1)),
+			result.get("growth_by_stat", {}).duplicate(true)
+		)
+		push_gameplay_notification(
+			"%s升级至Lv.%d。" % [
+				get_character_display_name(character_id),
+				int(result.get("new_level", 1)),
+			],
+			&"level_up",
+			{
+				"character_id": character_id,
+				"levels_gained": int(result.get("levels_gained", 0)),
+				"growth_by_stat": result.get("growth_by_stat", {}).duplicate(true),
+			}
+		)
+	state_changed.emit()
+	return result
+
+
+func settle_life_job_work_experience(
+	building_id: StringName,
+	settlement_key: StringName
+) -> Array:
+	if settlement_key == &"" or get_building_data(building_id) == null:
+		return []
+	if StringName(life_work_settlement_keys.get(building_id, &"")) == settlement_key:
+		return []
+	# Mark the completed cycle even when no one is assigned, so assigning after
+	# completion cannot retroactively collect experience.
+	life_work_settlement_keys[building_id] = settlement_key
+	var results: Array = []
+	var production_details := get_building_production_details(building_id)
+	for job: Dictionary in get_building_jobs(building_id):
+		var character_id := StringName(job.get("character_id", &""))
+		if character_id == &"":
+			continue
+		var record = character_roster.get_character(character_id)
+		var job_id := StringName(job.get("job_id", &""))
+		if record == null \
+				or not record.is_life_character() \
+				or record.life_data.work_state != CharacterEnumsScript.WorkState.WORKING \
+				or record.life_data.assigned_building_id != building_id \
+				or record.life_data.assigned_job_id != job_id:
+			continue
+		var efficiency := get_life_job_efficiency(character_id, building_id, job_id)
+		if not bool(efficiency.get("success", false)):
+			continue
+		var experience_bonus_percent := float(
+			efficiency.get("work_experience_bonus_percent", 0.0)
+		)
+		var experience_amount := int(floor(
+			float(LIFE_WORK_BASE_EXPERIENCE)
+				* (1.0 + experience_bonus_percent / 100.0)
+				+ 0.5
+		))
+		var result := add_life_character_experience(character_id, experience_amount)
+		if bool(result.get("success", false)):
+			result["job_id"] = job_id
+			result["job_type"] = StringName(job.get("job_type", &""))
+			result["base_experience"] = LIFE_WORK_BASE_EXPERIENCE
+			result["experience_bonus_percent"] = experience_bonus_percent
+			result["final_production_multiplier"] = float(
+				production_details.get("final_production_multiplier", 1.0)
+			)
+			results.append(result)
+	life_work_settled.emit(building_id, results.duplicate(true))
+	return results
+
+
+func get_life_work_state_display_name(work_state: int) -> String:
+	match work_state:
+		CharacterEnumsScript.WorkState.WORKING:
+			return "工作中"
+		CharacterEnumsScript.WorkState.UNAVAILABLE:
+			return "不可用"
+	return "空闲"
+
+
+func generate_life_character_candidate(forced_quality: int = -1) -> Dictionary:
+	return life_recruitment_system.generate_candidate(self, forced_quality)
+
+
+func get_life_recruitment_candidates() -> Array:
+	return life_recruitment_system.get_candidates(self)
+
+
+func get_life_recruitment_candidate(candidate_id: StringName) -> Dictionary:
+	return life_recruitment_system.get_candidate(self, candidate_id)
+
+
+func refresh_life_recruitment_candidates() -> bool:
+	var result: Dictionary = life_recruitment_system.refresh_candidates(self)
+	if not bool(result.get("success", false)):
+		push_gameplay_notification(get_life_recruitment_last_error(), &"error")
+		return false
+	life_recruitment_candidates_changed.emit()
+	state_changed.emit()
+	push_gameplay_notification("候选刷新成功，已保留锁定候选。", &"recruitment")
+	return true
+
+
+func set_life_recruitment_candidate_locked(
+	candidate_id: StringName,
+	is_locked: bool
+) -> bool:
+	if not life_recruitment_system.set_candidate_locked(
+		self, candidate_id, is_locked
+	):
+		push_gameplay_notification(get_life_recruitment_last_error(), &"error")
+		return false
+	life_recruitment_candidates_changed.emit()
+	state_changed.emit()
+	push_gameplay_notification(
+		"候选已%s。" % ("锁定" if is_locked else "取消锁定"),
+		&"recruitment",
+		{"candidate_id": candidate_id, "is_locked": is_locked}
+	)
+	return true
+
+
+func recruit_life_candidate(candidate_id: StringName) -> bool:
+	var result: Dictionary = life_recruitment_system.recruit_candidate(
+		self, candidate_id
+	)
+	if not bool(result.get("success", false)):
+		push_gameplay_notification(get_life_recruitment_last_error(), &"error")
+		return false
+	character_roster_changed.emit()
+	character_data_changed.emit(candidate_id)
+	life_recruitment_candidates_changed.emit()
+	life_character_recruited.emit(candidate_id)
+	_emit_life_character_capacity_changed()
+	state_changed.emit()
+	push_gameplay_notification(
+		"招募成功：%s已加入生活角色名册。" % get_character_display_name(candidate_id),
+		&"recruitment",
+		{"character_id": candidate_id}
+	)
+	return true
+
+
+func get_life_character_capacity() -> int:
+	return life_recruitment_system.get_life_character_capacity(self)
+
+
+func get_life_character_capacity_details() -> Dictionary:
+	return life_recruitment_system.get_capacity_details(self)
+
+
+func get_life_recruitment_costs() -> Dictionary:
+	return life_recruitment_system.get_cost_config()
+
+
+func get_life_recruitment_generation_config() -> Dictionary:
+	return life_recruitment_system.get_generation_config()
+
+
+func get_life_recruitment_quality_for_roll(roll: int) -> int:
+	return life_recruitment_system.get_quality_for_roll(roll)
+
+
+func get_life_quality_display_name(quality: int) -> String:
+	return life_recruitment_system.get_quality_display_name(quality)
+
+
+func get_life_recruitment_last_error() -> String:
+	return life_recruitment_system.last_error
+
+
+func get_life_recruitment_state_for_save() -> Dictionary:
+	var saved_state := life_recruitment_state.duplicate(true)
+	# RNG state is a 64-bit integer. Store it as text so JSON round trips do not
+	# lose precision through floating-point number parsing.
+	saved_state["random_seed"] = str(
+		int(life_recruitment_state.get("random_seed", 0))
+	)
+	saved_state["random_state"] = str(
+		int(life_recruitment_state.get("random_state", 0))
+	)
+	return saved_state
+
+
+func normalize_life_recruitment_state(raw_state: Dictionary) -> Dictionary:
+	return life_recruitment_system.normalize_loaded_state(self, raw_state)
+
+
+func set_life_character_locked(character_id: StringName, is_locked: bool) -> bool:
+	var record = character_roster.get_character(character_id)
+	if record == null or not record.is_life_character():
+		push_gameplay_notification("角色锁定状态修改失败：生活角色不存在。", &"error")
+		return false
+	if record.is_locked == is_locked:
+		return true
+	if not character_roster.set_character_locked(character_id, is_locked):
+		return false
+	character_data_changed.emit(character_id)
+	character_roster_changed.emit()
+	life_character_lock_changed.emit(character_id, is_locked)
+	state_changed.emit()
+	push_gameplay_notification(
+		"%s已%s。" % [
+			get_character_display_name(character_id),
+			"锁定" if is_locked else "取消锁定",
+		],
+		&"character",
+		{"character_id": character_id, "is_locked": is_locked}
+	)
+	return true
+
+
+func dismiss_life_character(
+	character_id: StringName,
+	auto_unassign: bool = true
+) -> bool:
+	var record = character_roster.get_character(character_id)
+	if record == null or not record.is_life_character() or record.is_locked:
+		push_gameplay_notification("解雇失败：角色不存在、类型无效或已锁定。", &"error")
+		return false
+	var is_assigned: bool = record.life_data.assigned_building_id != &"" \
+		or record.life_data.assigned_job_id != &"" \
+		or record.life_data.work_state == CharacterEnumsScript.WorkState.WORKING
+	if is_assigned and not auto_unassign:
+		push_gameplay_notification("解雇失败：工作中角色需要先确认自动撤岗。", &"error")
+		return false
+	var display_name := String(record.display_name)
+	if not remove_roster_character(character_id):
+		push_gameplay_notification("解雇失败：角色或岗位状态已变化。", &"error")
+		return false
+	life_character_dismissed.emit(character_id)
+	state_changed.emit()
+	push_gameplay_notification(
+		"解雇成功：%s已离开名册。" % display_name,
+		&"dismissal",
+		{"character_id": character_id}
+	)
+	return true
+
+
 func get_character_roster_data() -> Dictionary:
 	return character_roster.to_dictionary()
 
@@ -1313,33 +2367,178 @@ func generate_character_id(prefix: String = "character") -> StringName:
 	return character_roster.generate_unique_id(prefix)
 
 
-func add_roster_character(character_data: Dictionary) -> bool:
+func add_roster_character(
+	character_data: Dictionary,
+	emit_signals: bool = true
+) -> bool:
 	if not character_roster.add_character_from_dictionary(character_data):
 		return false
 	character_runtime_states = character_roster.create_combat_runtime_adapter()
+	if not emit_signals:
+		return true
 	character_roster_changed.emit()
 	character_data_changed.emit(StringName(character_data.get("character_id", &"")))
+	if int(character_data.get("character_type", CharacterEnumsScript.CharacterType.COMBAT)) \
+			== CharacterEnumsScript.CharacterType.LIFE:
+		_emit_life_character_capacity_changed()
 	state_changed.emit()
 	return true
 
 
 func remove_roster_character(character_id: StringName) -> bool:
+	var snapshot: Dictionary = get_roster_character(character_id)
+	if snapshot.is_empty() or bool(snapshot.get("is_locked", false)):
+		return false
+	if StringName(snapshot.get("character_type_name", &"")) == &"life":
+		unassign_life_character(character_id)
 	if not character_roster.remove_character(character_id):
 		return false
 	character_runtime_states = character_roster.create_combat_runtime_adapter()
 	rebuild_adventurers_from_character_data(false)
 	character_roster_changed.emit()
+	if StringName(snapshot.get("character_type_name", &"")) == &"life":
+		_emit_life_character_capacity_changed()
 	state_changed.emit()
 	return true
 
 
 func set_life_character_assignment(character_id: StringName, building_id: StringName, job_id: StringName, work_state: int) -> bool:
-	if not character_roster.set_life_assignment(character_id, building_id, job_id, work_state):
+	if work_state == CharacterEnumsScript.WorkState.WORKING:
+		return assign_life_character_to_job(character_id, building_id, job_id)
+	if building_id != &"" or job_id != &"":
+		return false
+	if work_state == CharacterEnumsScript.WorkState.IDLE:
+		return unassign_life_character(character_id)
+	if work_state != CharacterEnumsScript.WorkState.UNAVAILABLE:
+		return false
+	var record = character_roster.get_character(character_id)
+	if record == null or not record.is_life_character():
+		return false
+	var changed_buildings: Array[StringName] = building_system.clear_character_job_references(self, character_id)
+	if record.life_data.assigned_building_id != &"" and not changed_buildings.has(record.life_data.assigned_building_id):
+		changed_buildings.append(record.life_data.assigned_building_id)
+	if not character_roster.set_life_assignment(
+		character_id, &"", &"", CharacterEnumsScript.WorkState.UNAVAILABLE
+	):
+		return false
+	_emit_life_job_changes([character_id], changed_buildings)
+	return true
+
+
+func set_life_character_work_experience(character_id: StringName, work_experience: int) -> bool:
+	if not character_roster.set_life_work_experience(character_id, work_experience):
 		return false
 	character_roster_changed.emit()
 	character_data_changed.emit(character_id)
 	state_changed.emit()
 	return true
+
+
+func reconcile_life_job_assignments(emit_signals: bool = false) -> Dictionary:
+	building_system.ensure_initial_runtime_state(self)
+	var seen_characters: Dictionary = {}
+	var changed_buildings: Array[StringName] = []
+	var repaired_characters: Array[StringName] = []
+	var cleared_job_count := 0
+	for building_id: StringName in get_building_ids():
+		for job: Dictionary in get_building_jobs(building_id):
+			var job_id := StringName(job.get("job_id", &""))
+			var character_id := StringName(job.get("character_id", &""))
+			if character_id == &"":
+				continue
+			var record = character_roster.get_character(character_id)
+			var should_clear: bool = record == null \
+				or not record.is_life_character() \
+				or record.life_data.work_state == CharacterEnumsScript.WorkState.UNAVAILABLE \
+				or seen_characters.has(character_id)
+			if should_clear:
+				building_system.set_job_character_id(self, building_id, job_id, &"")
+				if not changed_buildings.has(building_id):
+					changed_buildings.append(building_id)
+				cleared_job_count += 1
+				continue
+			seen_characters[character_id] = {"building_id": building_id, "job_id": job_id}
+			if record.life_data.assigned_building_id != building_id \
+					or record.life_data.assigned_job_id != job_id \
+					or record.life_data.work_state != CharacterEnumsScript.WorkState.WORKING:
+				character_roster.set_life_assignment(
+					character_id, building_id, job_id, CharacterEnumsScript.WorkState.WORKING
+				)
+				if not repaired_characters.has(character_id):
+					repaired_characters.append(character_id)
+
+	for record in character_roster.get_all_life_characters():
+		var character_id: StringName = record.character_id
+		if seen_characters.has(character_id):
+			continue
+		if record.life_data.work_state == CharacterEnumsScript.WorkState.UNAVAILABLE:
+			if record.life_data.assigned_building_id != &"" or record.life_data.assigned_job_id != &"":
+				character_roster.set_life_assignment(
+					character_id, &"", &"", CharacterEnumsScript.WorkState.UNAVAILABLE
+				)
+				repaired_characters.append(character_id)
+			continue
+		var recorded_building_id: StringName = record.life_data.assigned_building_id
+		var recorded_job_id: StringName = record.life_data.assigned_job_id
+		var recorded_job: Dictionary = building_system.get_building_job(
+			self, recorded_building_id, recorded_job_id
+		)
+		if recorded_building_id != &"" \
+				and recorded_job_id != &"" \
+				and not recorded_job.is_empty() \
+				and StringName(recorded_job.get("character_id", &"")) == &"":
+			building_system.set_job_character_id(
+				self, recorded_building_id, recorded_job_id, character_id
+			)
+			character_roster.set_life_assignment(
+				character_id,
+				recorded_building_id,
+				recorded_job_id,
+				CharacterEnumsScript.WorkState.WORKING
+			)
+			seen_characters[character_id] = {
+				"building_id": recorded_building_id,
+				"job_id": recorded_job_id,
+			}
+			if not changed_buildings.has(recorded_building_id):
+				changed_buildings.append(recorded_building_id)
+			repaired_characters.append(character_id)
+			continue
+		if record.life_data.assigned_building_id != &"" \
+				or record.life_data.assigned_job_id != &"" \
+				or record.life_data.work_state == CharacterEnumsScript.WorkState.WORKING:
+			character_roster.set_life_assignment(
+				character_id, &"", &"", CharacterEnumsScript.WorkState.IDLE
+			)
+			repaired_characters.append(character_id)
+
+	if emit_signals and (not changed_buildings.is_empty() or not repaired_characters.is_empty()):
+		_emit_life_job_changes(repaired_characters, changed_buildings)
+	return {
+		"repaired_character_ids": repaired_characters,
+		"changed_building_ids": changed_buildings,
+		"cleared_job_count": cleared_job_count,
+	}
+
+
+func _emit_life_job_changes(character_ids: Array, building_ids: Array) -> void:
+	var emitted_characters: Array[StringName] = []
+	for raw_character_id in character_ids:
+		var character_id := StringName(raw_character_id)
+		if character_id == &"" or emitted_characters.has(character_id):
+			continue
+		emitted_characters.append(character_id)
+		character_data_changed.emit(character_id)
+	character_roster_changed.emit()
+	var emitted_buildings: Array[StringName] = []
+	for raw_building_id in building_ids:
+		var building_id := StringName(raw_building_id)
+		if building_id == &"" or emitted_buildings.has(building_id):
+			continue
+		emitted_buildings.append(building_id)
+		life_job_assignments_changed.emit(building_id)
+		building_state_changed.emit(building_id)
+	state_changed.emit()
 
 
 func set_character_progression(character_id: StringName, level: int, experience: int, experience_to_next_level: int) -> bool:
@@ -1359,11 +2558,13 @@ func grant_character_experience(character_id: StringName, amount: int, emit_sign
 	var record = character_roster.get_character(character_id)
 	if record == null or not record.is_combat_character():
 		return {"success": false, "character_id": character_id, "levels_gained": 0}
-	var old_max_hp := int(get_final_combat_stats(character_id).get("max_hp", 1))
+	var old_stats := get_final_combat_stats(character_id)
+	var old_max_hp := int(old_stats.get("max_hp", 1))
 	var result: Dictionary = character_roster.grant_experience(character_id, amount)
 	if not bool(result.get("success", false)):
 		return result
-	var new_max_hp := int(get_final_combat_stats(character_id).get("max_hp", old_max_hp))
+	var new_stats := get_final_combat_stats(character_id)
+	var new_max_hp := int(new_stats.get("max_hp", old_max_hp))
 	if int(record.combat_data.current_hp) > 0:
 		record.combat_data.current_hp = clampi(
 			int(record.combat_data.current_hp) + maxi(0, new_max_hp - old_max_hp),
@@ -1373,6 +2574,31 @@ func grant_character_experience(character_id: StringName, amount: int, emit_sign
 	result["old_max_hp"] = old_max_hp
 	result["new_max_hp"] = new_max_hp
 	result["current_hp"] = int(record.combat_data.current_hp)
+	result["display_name"] = String(record.display_name)
+	var stat_changes: Dictionary = {}
+	for stat_id: String in ["max_hp", "attack", "defense", "speed"]:
+		var old_value := int(old_stats.get(stat_id, 0))
+		var new_value := int(new_stats.get(stat_id, old_value))
+		if new_value != old_value:
+			stat_changes[stat_id] = {
+				"before": old_value,
+				"after": new_value,
+				"delta": new_value - old_value,
+			}
+	result["stat_changes"] = stat_changes
+	if int(result.get("levels_gained", 0)) > 0:
+		push_gameplay_notification(
+			"%s升级至Lv.%d。" % [
+				String(record.display_name),
+				int(result.get("new_level", record.level)),
+			],
+			&"level_up",
+			{
+				"character_id": character_id,
+				"levels_gained": int(result.get("levels_gained", 0)),
+				"stat_changes": stat_changes.duplicate(true),
+			}
+		)
 	if emit_signals:
 		rebuild_adventurers_from_character_data(false)
 		character_roster_changed.emit()
@@ -1384,6 +2610,8 @@ func grant_character_experience(character_id: StringName, amount: int, emit_sign
 
 
 func _grant_battle_result_experience(result: Dictionary) -> void:
+	if bool(result.get("experience_processed", false)):
+		return
 	var experience_reward := BATTLE_EXPERIENCE_DEFEAT
 	if String(result.get("outcome", "")) == "victory":
 		experience_reward = BATTLE_EXPERIENCE_BOSS if bool(result.get("is_boss", false)) else BATTLE_EXPERIENCE_NORMAL
@@ -1399,6 +2627,7 @@ func _grant_battle_result_experience(result: Dictionary) -> void:
 			experience_results.append(experience_result)
 	result["experience_reward"] = experience_reward
 	result["experience_results"] = experience_results
+	result["experience_processed"] = true
 	if experience_results.is_empty():
 		return
 	rebuild_adventurers_from_character_data(false)
@@ -1851,6 +3080,8 @@ func emit_full_state_refresh_after_load() -> void:
 	food_workshop_state_changed.emit()
 	hospital_state_changed.emit()
 	emit_all_stackable_item_count_changed()
+	life_recruitment_candidates_changed.emit()
+	_emit_life_character_capacity_changed()
 	state_changed.emit()
 
 
@@ -1966,3 +3197,60 @@ func emit_all_stackable_item_count_changed() -> void:
 	for raw_item_id in stackable_item_inventory.keys():
 		var item_id := StringName(raw_item_id)
 		stackable_item_count_changed.emit(item_id, get_item_count(item_id))
+
+
+func _life_character_matches_filter(
+	snapshot: Dictionary,
+	filter_id: StringName
+) -> bool:
+	if filter_id == &"all":
+		return true
+	var life_data: Dictionary = snapshot.get("life_data", {})
+	var work_state := int(
+		life_data.get("work_state", CharacterEnumsScript.WorkState.IDLE)
+	)
+	if filter_id == &"idle":
+		return work_state == CharacterEnumsScript.WorkState.IDLE \
+			and StringName(life_data.get("assigned_building_id", &"")) == &""
+	if filter_id == &"working":
+		return work_state == CharacterEnumsScript.WorkState.WORKING \
+			and StringName(life_data.get("assigned_building_id", &"")) != &""
+	if filter_id in LifeStatsScript.CORE_STAT_IDS:
+		return _get_life_character_primary_stat_id(snapshot) == filter_id
+	return true
+
+
+func _get_life_character_sort_value(
+	snapshot: Dictionary,
+	sort_id: StringName
+):
+	if sort_id == &"level":
+		return int(snapshot.get("level", 1))
+	if sort_id == &"quality":
+		return int(snapshot.get("quality", CharacterEnumsScript.Quality.COMMON))
+	if sort_id in LifeStatsScript.CORE_STAT_IDS:
+		var life_data: Dictionary = snapshot.get("life_data", {})
+		var stats: Dictionary = life_data.get("life_stats", {})
+		return int(stats.get(String(sort_id), 0))
+	return int(snapshot.get("created_sequence", 0))
+
+
+func _get_life_character_primary_stat_id(snapshot: Dictionary) -> StringName:
+	var life_data: Dictionary = snapshot.get("life_data", {})
+	var stats: Dictionary = life_data.get("life_stats", {})
+	var selected_stat_id := LifeStatsScript.CORE_STAT_IDS[0]
+	var selected_value := -1
+	for stat_id: StringName in LifeStatsScript.CORE_STAT_IDS:
+		var value := int(stats.get(String(stat_id), 0))
+		if value > selected_value:
+			selected_stat_id = stat_id
+			selected_value = value
+	return selected_stat_id
+
+
+func _emit_life_character_capacity_changed() -> void:
+	var details := get_life_character_capacity_details()
+	life_character_capacity_changed.emit(
+		int(details.get("current_count", 0)),
+		int(details.get("capacity", 0))
+	)

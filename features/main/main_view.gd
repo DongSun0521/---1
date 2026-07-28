@@ -24,6 +24,8 @@ func _ready() -> void:
 	game_state.battle_started.connect(on_battle_started)
 	game_state.battle_finished.connect(on_battle_finished)
 	game_state.mvp_completed.connect(show_mvp_completed)
+	if battle_view.has_signal("battle_result_acknowledged"):
+		battle_view.battle_result_acknowledged.connect(on_battle_result_acknowledged)
 	show_village()
 
 
@@ -44,6 +46,10 @@ func _exit_tree() -> void:
 		game_state.battle_finished.disconnect(on_battle_finished)
 	if game_state != null and game_state.mvp_completed.is_connected(show_mvp_completed):
 		game_state.mvp_completed.disconnect(show_mvp_completed)
+	if battle_view != null \
+			and battle_view.has_signal("battle_result_acknowledged") \
+			and battle_view.battle_result_acknowledged.is_connected(on_battle_result_acknowledged):
+		battle_view.battle_result_acknowledged.disconnect(on_battle_result_acknowledged)
 
 
 func setup_mvp_panel() -> void:
@@ -159,6 +165,10 @@ func format_mvp_summary(summary: Dictionary) -> String:
 
 
 func on_expedition_ended(_report: Dictionary) -> void:
+	if battle_view != null \
+			and battle_view.has_method("is_presenting_battle_result") \
+			and battle_view.is_presenting_battle_result():
+		return
 	show_village()
 
 
@@ -167,6 +177,14 @@ func on_battle_started(_encounter_id: StringName) -> void:
 
 
 func on_battle_finished(result: Dictionary) -> void:
+	if battle_view != null \
+			and battle_view.has_method("is_presenting_battle_result") \
+			and battle_view.is_presenting_battle_result():
+		return
+	on_battle_result_acknowledged(result)
+
+
+func on_battle_result_acknowledged(result: Dictionary) -> void:
 	if String(result["outcome"]) == "victory":
 		show_expedition()
 	else:

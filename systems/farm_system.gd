@@ -150,12 +150,23 @@ func process_daily_growth(game_state: Node, report: Dictionary) -> Dictionary:
 		if harvested:
 			var resource_id: StringName = crop.output_resource_id
 			var resource_key := String(resource_id)
-			game_state.resources[resource_key] = int(game_state.resources.get(resource_key, 0)) + crop.output_amount
-			produced_by_resource[resource_id] = int(produced_by_resource.get(resource_id, 0)) + crop.output_amount
+			var output_amount: int = game_state.calculate_building_production_output(
+				&"farm", int(crop.output_amount)
+			)
+			game_state.resources[resource_key] = int(
+				game_state.resources.get(resource_key, 0)
+			) + output_amount
+			produced_by_resource[resource_id] = int(
+				produced_by_resource.get(resource_id, 0)
+			) + output_amount
 			plot.progress_days = 0
 			update["progress_after"] = 0
 			update["output_resource_id"] = resource_id
-			update["output_amount"] = crop.output_amount
+			update["base_output_amount"] = int(crop.output_amount)
+			update["output_amount"] = output_amount
+			update["production_multiplier"] = game_state.get_building_final_production_multiplier(
+				&"farm"
+			)
 			harvests.append(update.duplicate(true))
 		plot_updates.append(update)
 
@@ -164,6 +175,13 @@ func process_daily_growth(game_state: Node, report: Dictionary) -> Dictionary:
 	report["farm_food_produced"] = int(produced_by_resource.get(&"food", 0))
 	report["farm_herb_produced"] = int(produced_by_resource.get(&"herb", 0))
 	report["food_produced"] = int(report.get("food_produced", 0)) + int(report["farm_food_produced"])
+	report["farm_production_details"] = game_state.get_building_production_details(&"farm")
+	report["farm_work_experience_results"] = []
+	if not harvests.is_empty():
+		report["farm_work_experience_results"] = game_state.settle_life_job_work_experience(
+			&"farm", StringName("farm_day_%d" % int(game_state.current_day))
+		)
+		game_state.record_life_work_feedback(&"farm", report)
 	return report
 
 

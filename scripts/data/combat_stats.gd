@@ -1,6 +1,8 @@
 class_name CombatStats
 extends Resource
 
+const Stage12Config := preload("res://scripts/data/stage12_balance_config.gd")
+
 @export var max_hp: int = 0
 @export var attack: int = 0
 @export var defense: int = 0
@@ -24,9 +26,17 @@ func setup(
 	defense = p_defense
 	speed = p_speed
 	attack_speed = float(p_speed) if p_attack_speed < 0.0 else p_attack_speed
-	crit_rate = maxf(0.0, p_crit_rate)
+	crit_rate = clampf(
+		p_crit_rate,
+		Stage12Config.COMBAT_CRIT_RATE_MIN,
+		Stage12Config.COMBAT_CRIT_RATE_MAX
+	)
 	# CombatStats is also used for per-level deltas, where zero crit damage is valid.
-	crit_damage = maxf(0.0, p_crit_damage)
+	crit_damage = clampf(
+		p_crit_damage,
+		Stage12Config.COMBAT_CRIT_DAMAGE_MIN,
+		Stage12Config.COMBAT_CRIT_DAMAGE_MAX
+	)
 	return self
 
 

@@ -68,7 +68,7 @@ func assert_equipment_and_save(game_state: Node) -> void:
 	require(int(game_state.get_final_combat_stats(&"guard").get("attack", 0)) > attack_before, "equipment should immediately affect final stats")
 	require(game_state.set_party_members([&"mage", &"guard"]), "saved party order setup failed")
 	var save_data: Dictionary = game_state.create_save_data()
-	require(int(save_data.get("save_version", 0)) == 2, "Stage 12B save version should be 2")
+	require(int(save_data.get("save_version", 0)) == 6, "current save version should include Stage 12F integration")
 	var expected_guard: Dictionary = game_state.get_roster_character(&"guard")
 
 	game_state.start_new_game()

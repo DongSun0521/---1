@@ -3,6 +3,7 @@ extends RefCounted
 
 const CharacterEnumsScript := preload("res://scripts/data/character_enums.gd")
 const CombatStatsScript := preload("res://scripts/data/combat_stats.gd")
+const Stage12Config := preload("res://scripts/data/stage12_balance_config.gd")
 
 var combat_class: int = CharacterEnumsScript.CombatClass.WARRIOR
 var profession_id: StringName = &"guard"
@@ -79,6 +80,23 @@ func calculate_final_stat_details(
 			after_injury = maxf(1.0, floor(before_injury * injury_multiplier))
 		var temporary_value: float = float(temporary_bonuses.get(stat_id, 0.0))
 		var final_value: float = after_injury + temporary_value
+		match stat_id:
+			"max_hp":
+				final_value = maxf(1.0, final_value)
+			"attack", "defense", "speed", "attack_speed":
+				final_value = maxf(0.0, final_value)
+			"crit_rate":
+				final_value = clampf(
+					final_value,
+					Stage12Config.COMBAT_CRIT_RATE_MIN,
+					Stage12Config.COMBAT_CRIT_RATE_MAX
+				)
+			"crit_damage":
+				final_value = clampf(
+					final_value,
+					Stage12Config.COMBAT_CRIT_DAMAGE_MIN,
+					Stage12Config.COMBAT_CRIT_DAMAGE_MAX
+				)
 		var use_float := stat_id in ["attack_speed", "crit_rate", "crit_damage"]
 		result[stat_id] = {
 			"base": base_value if use_float else int(base_value),
