@@ -19,6 +19,8 @@ var building_views: Dictionary = {}
 var resource_label: Label
 var adventurer_label: Label
 var logistics_overview_label: Label
+var function_dock: PanelContainer
+var function_dock_button_row: HBoxContainer
 var detail_panel: PanelContainer
 var detail_title_label: Label
 var detail_body_label: Label
@@ -262,10 +264,9 @@ func build_visual_layout() -> void:
 
 	build_building_views()
 	add_hotspot(&"prep", "开始远征", Rect2(0.78, 0.05, 0.18, 0.10))
-	add_hotspot(&"codex", "战斗角色", Rect2(0.03, 0.32, 0.16, 0.10))
-	add_hotspot(&"life_roster", "生活角色", Rect2(0.03, 0.43, 0.16, 0.10))
 
 	build_overview_panel()
+	build_function_dock()
 	build_detail_panel()
 	build_character_page()
 	build_life_character_page()
@@ -356,6 +357,54 @@ func build_overview_panel() -> void:
 		apply_button_style(button, false)
 		button.pressed.connect(select_building.bind(building_id))
 		logistics_button_row.add_child(button)
+
+
+func build_function_dock() -> void:
+	function_dock = create_panel("VillageFunctionDock", 0.92)
+	function_dock.z_index = 110
+	function_dock.mouse_filter = Control.MOUSE_FILTER_STOP
+	set_anchor_rect(function_dock, Rect2(0.31, 0.90, 0.38, 0.085))
+	add_child(function_dock)
+
+	var margin := create_margin(8)
+	function_dock.add_child(margin)
+	function_dock_button_row = HBoxContainer.new()
+	function_dock_button_row.name = "VillageFunctionButtons"
+	function_dock_button_row.add_theme_constant_override("separation", 10)
+	margin.add_child(function_dock_button_row)
+
+	add_function_dock_button(
+		"OpenCombatCharactersButton",
+		"战斗角色",
+		"查看战斗角色、装备、技能与编队",
+		show_character_page
+	)
+	add_function_dock_button(
+		"OpenLifeCharactersButton",
+		"生活角色",
+		"查看生活角色、岗位与招募入口",
+		show_life_character_page
+	)
+
+
+func add_function_dock_button(
+	button_name: String,
+	button_text: String,
+	tooltip: String,
+	callback: Callable
+) -> Button:
+	var button := Button.new()
+	button.name = button_name
+	button.text = button_text
+	button.tooltip_text = tooltip
+	button.custom_minimum_size = Vector2(170, 46)
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	button.add_theme_font_size_override("font_size", 20)
+	apply_button_style(button, true)
+	button.pressed.connect(callback)
+	function_dock_button_row.add_child(button)
+	return button
 
 
 func build_detail_panel() -> void:
@@ -2217,53 +2266,94 @@ func refresh_daily_report(report: Dictionary) -> void:
 		daily_report_label.text = "尚未推进时间。"
 		return
 
-	if report.has("daily_summary_lines"):
-		var summary_lines: Array = report.get("daily_summary_lines", [])
+	var raw_summary_lines = report.get("daily_summary_lines", null)
+	if raw_summary_lines is Array:
+		var summary_lines: Array = raw_summary_lines
 		var display_lines := PackedStringArray(summary_lines)
 		append_recent_work_feedback_lines(
 			display_lines,
-			int(report.get("settled_day", game_state.current_day))
+			int(report.get(
+				"settled_day",
+				report.get("day_before", game_state.current_day)
+			))
 		)
 		daily_report_label.text = "\n".join(display_lines)
 		return
 
+	# Legacy, hot-reloaded, or partially damaged runtime reports may omit the
+	# structured summary and some of the old flat keys. The daily report is UI
+	# feedback, so missing optional data must degrade to defaults instead of
+	# interrupting every state refresh.
+	var settled_day := int(report.get(
+		"settled_day",
+		report.get("day_before", game_state.current_day)
+	))
+	var food_produced := int(report.get(
+		"food_produced",
+		report.get("farm_food_produced", 0)
+	))
+	var medicine_produced := int(report.get("medicine_produced", 0))
+	var medicine_progress := int(report.get("medicine_progress", 0))
+	var medicine_progress_required := int(report.get("medicine_progress_required", 0))
+	var food_consumed := int(report.get("food_consumed", 0))
+	var food_net := int(report.get(
+		"food_net",
+		int(report.get("food_after", 0)) - int(report.get("food_before", 0))
+	))
+	var medicine_net := int(report.get(
+		"medicine_net",
+		int(report.get("medicine_after", 0)) - int(report.get("medicine_before", 0))
+	))
 	var lines := PackedStringArray()
-	lines.append("第 %d 天结算" % int(report["settled_day"]))
+	lines.append("第 %d 天结算" % settled_day)
 	lines.append("")
-	lines.append("农田生产粮食：+%d" % int(report["food_produced"]))
+	lines.append("农田生产粮食：+%d" % food_produced)
 	append_farm_report_lines(lines, report)
-	if int(report["medicine_produced"]) > 0:
-		lines.append("医院完成药品：+%d" % int(report["medicine_produced"]))
+	if medicine_produced > 0:
+		lines.append("医院完成药品：+%d" % medicine_produced)
 	else:
 		lines.append("医院生产进度：%d/%d" % [
-			int(report["medicine_progress"]),
-			int(report["medicine_progress_required"]),
+			medicine_progress,
+			medicine_progress_required,
 		])
-	lines.append("村庄消耗粮食：-%d" % int(report["food_consumed"]))
+	lines.append("村庄消耗粮食：-%d" % food_consumed)
 	if int(report.get("expedition_food_consumed", 0)) > 0:
-		lines.append("远征口粮消耗：-%d" % int(report["expedition_food_consumed"]))
-	var project_report: Dictionary = report.get("project_report", {})
+		lines.append(
+			"远征口粮消耗：-%d"
+			% int(report.get("expedition_food_consumed", 0))
+		)
+	var project_report := get_safe_report_dictionary(report, "project_report")
 	if bool(project_report.get("had_active_project", false)):
 		lines.append("工坊项目：%s %d/%d" % [
-			String(project_report["display_name"]),
-			int(project_report["progress_after"]),
-			int(project_report["required_days"]),
+			String(project_report.get("display_name", "建设项目")),
+			int(project_report.get("progress_after", 0)),
+			int(project_report.get("required_days", 0)),
 		])
 		if bool(project_report.get("project_completed", false)):
 			lines.append("项目完成：%s" % String(project_report.get("effect_text", "")))
-	var forge_report: Dictionary = report.get("forge_report", {})
+	var forge_report := get_safe_report_dictionary(report, "forge_report")
 	if bool(forge_report.get("had_active_forge", false)):
 		lines.append("装备打造：%s %d/%d" % [
-			String(forge_report["display_name"]),
-			int(forge_report["progress_after"]),
-			int(forge_report["required_days"]),
+			String(forge_report.get("display_name", "装备")),
+			int(forge_report.get("progress_after", 0)),
+			int(forge_report.get("required_days", 0)),
 		])
 		if bool(forge_report.get("forge_completed", false)):
 			lines.append(String(forge_report.get("effect_text", "")))
 	lines.append("")
-	lines.append("粮食净变化：%s" % format_signed_amount(int(report["food_net"])))
-	lines.append("药品净变化：%s" % format_signed_amount(int(report["medicine_net"])))
+	lines.append("粮食净变化：%s" % format_signed_amount(food_net))
+	lines.append("药品净变化：%s" % format_signed_amount(medicine_net))
 	daily_report_label.text = "\n".join(lines)
+
+
+func get_safe_report_dictionary(report: Dictionary, key: String) -> Dictionary:
+	var value = report.get(key, {})
+	return value if value is Dictionary else {}
+
+
+func get_safe_report_array(report: Dictionary, key: String) -> Array:
+	var value = report.get(key, [])
+	return value if value is Array else []
 
 
 func append_recent_work_feedback_lines(lines: PackedStringArray, settled_day: int) -> void:
@@ -2322,14 +2412,17 @@ func format_recent_life_work_feedback(feedback: Dictionary) -> String:
 
 
 func append_farm_report_lines(lines: PackedStringArray, report: Dictionary) -> void:
-	var harvests: Array = report.get("farm_harvests", [])
+	var harvests := get_safe_report_array(report, "farm_harvests")
 	if harvests.is_empty():
-		var updates: Array = report.get("farm_plot_updates", [])
+		var updates := get_safe_report_array(report, "farm_plot_updates")
 		if updates.is_empty():
 			lines.append("农田：没有种植进度")
 			return
 		lines.append("农田生长")
-		for update: Dictionary in updates:
+		for raw_update in updates:
+			if not raw_update is Dictionary:
+				continue
+			var update: Dictionary = raw_update
 			lines.append("地块%d：%s %d/%d" % [
 				int(update.get("plot_id", 0)),
 				get_crop_display_name(StringName(update.get("crop_id", &""))),
@@ -2340,7 +2433,10 @@ func append_farm_report_lines(lines: PackedStringArray, report: Dictionary) -> v
 
 	var wheat_count := 0
 	var herb_count := 0
-	for harvest: Dictionary in harvests:
+	for raw_harvest in harvests:
+		if not raw_harvest is Dictionary:
+			continue
+		var harvest: Dictionary = raw_harvest
 		match StringName(harvest.get("crop_id", &"")):
 			&"wheat":
 				wheat_count += 1

@@ -430,6 +430,39 @@ func assert_stage12f_ui_and_session_state(game_state: Node) -> void:
 	var battle_view = main_view.find_child("BattleView", true, false)
 	require(village_view != null, "VillageView missing")
 	require(battle_view != null, "BattleView missing")
+	var combat_entry = village_view.find_child(
+		"OpenCombatCharactersButton", true, false
+	)
+	var life_entry = village_view.find_child(
+		"OpenLifeCharactersButton", true, false
+	)
+	require(village_view.function_dock != null, "main function dock missing")
+	require(combat_entry is Button, "combat character dock button missing")
+	require(life_entry is Button, "life character dock button missing")
+	combat_entry.pressed.emit()
+	require(village_view.character_page.visible, "combat dock button did not open its page")
+	village_view.hide_character_page()
+	life_entry.pressed.emit()
+	require(village_view.life_character_page.visible, "life dock button did not open its page")
+	village_view.hide_life_character_page()
+
+	village_view.refresh_daily_report({
+		"day_before": 7,
+		"food_produced": 1,
+		"project_report": null,
+		"forge_report": "damaged",
+		"farm_harvests": null,
+		"farm_plot_updates": ["damaged"],
+		"daily_summary_lines": null,
+	})
+	require(
+		String(village_view.daily_report_label.text).contains("第 7 天结算"),
+		"partial legacy daily report did not use the fallback day"
+	)
+	require(
+		String(village_view.daily_report_label.text).contains("农田生产粮食：+1"),
+		"partial legacy daily report lost valid fields"
+	)
 
 	village_view.show_character_page()
 	await process_frame

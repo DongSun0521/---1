@@ -1,10 +1,10 @@
 # 《冒险村》完整游戏策划案
 
 > 文件定位：本文件是项目的**核心玩法与产品设计唯一事实来源（Design Source of Truth）**。  
-> 建议放置位置：Godot 项目根目录 `/GAME_DESIGN.md`。  
+> 项目位置：`res://docs/GAME_DESIGN.md`。
 > 适用对象：策划、程序、美术、Codex。  
-> 文档版本：v0.2  
-> 当前阶段：玩法成长线原型期；战斗基础表现已基本完成，下一阶段优先补齐“冒险产出 → 村庄成长 → 再冒险”的循环。
+> 文档版本：v0.3
+> 当前阶段：Stage 12F 稳定基线；村庄、远征、战斗、双角色成长与招募闭环已建立，下一阶段优先处理稳定性、体验调优和单一主题扩展。
 
 ---
 
@@ -397,10 +397,10 @@ MVP 推荐使用“天”为最小结算单位；后续可细化为半天或时�
 
 ## 6.2 初始角色
 
-当前规划：
+当前实现：
 
-- 4名生活角色
-- 4名战斗角色
+- 3 名默认生活角色：阿禾、阿铁、小药；之后通过生活角色候选池扩充；
+- 4 名默认战斗角色：阿盾、林羽、米娅、露娜。
 
 初始角色应覆盖基础功能，避免开局因随机结果无法运行核心系统。
 
@@ -420,12 +420,14 @@ MVP 推荐使用“天”为最小结算单位；后续可细化为半天或时�
 
 | 能力 | 作用 |
 |---|---|
-| 烹饪 | 影响料理效率与品质 |
-| 科研 | 影响科技研究速度 |
-| 锻造 | 影响装备制造效率与品质 |
-| 治疗 | 影响角色恢复效率 |
-| 种植 | 影响农田产量 |
-| 采集 | 影响资源收集速度 |
+| 农业 | 影响农田岗位效率与产出 |
+| 制造 | 影响食物制造和锻造岗位效率 |
+| 采集 | 影响资源收集岗位效率 |
+| 研究 | 影响未来科研岗位效率 |
+| 医疗 | 影响制药和治疗岗位效率 |
+
+当前五项属性使用 0～100 数值，并在 UI 中直接展示。字母评级可作为未来视觉
+层换算，但不得另存一套会与正式数值分叉的能力数据。
 
 ### 6.3.2 战斗能力
 
@@ -480,20 +482,19 @@ MVP是否保留标签品质尚未最终确定。Codex不得在未确认前制作
 
 ## 6.7 招募方式
 
-当前可采用的来源：
+当前已实现的生活角色招募规则：
 
-- 开局固定角色
-- 村庄定期出现候选人
-- 野外冒险事件
-- 完成任务后加入
-- 特殊角色救援
-- 酒馆招募券（保留但不作为强付费抽卡设计）
+- 候选池固定保留 3 个槽位；
+- 候选包含品质、五项生活属性、特性、头像路径和粮食招募费用；
+- 玩家可以锁定候选，刷新只替换未锁定候选；
+- 手动刷新消耗 2 粮食；
+- 招募成功后角色进入正式 `CharacterRoster`，候选槽立即补充；
+- 民居等级决定正式生活角色容量；
+- 当前不实现战斗角色招募。
 
-推荐规则：
-
-- 每隔固定游戏时间，村庄出现3名候选人，玩家选择其中1名。
-- 特殊角色主要通过冒险事件获取。
-- 村庄发展方向影响候选人类型。
+野外事件、任务加入、特殊救援和村庄发展影响候选类型仍可作为后续扩展，但
+必须复用现有候选池与正式仓库，不得另建酒馆角色仓库或第二套随机生成系统。
+项目不采用强付费抽卡设计。
 
 ## 6.8 导师学习（后期系统，暂缓）
 
@@ -1067,7 +1068,7 @@ MVP优先：
 
 ---
 
-# 15. MVP范围
+# 15. 原始 MVP 范围
 
 ## 15.1 MVP目标
 
@@ -1076,6 +1077,9 @@ MVP优先：
 > 玩家在村庄安排生产后，带领队伍冒险；冒险过程中村庄同步运行；回村后，冒险成果能够明显推动建筑、装备和角色成长。
 
 ## 15.2 MVP内容规模
+
+本节保留最初的内容规模目标。该目标现已完成并被 Stage 8～12F 扩展；实际
+数量、页面和系统状态见第 16 节。
 
 ### 村庄
 
@@ -1087,10 +1091,10 @@ MVP优先：
 
 ### 角色
 
-- 4名生活角色
-- 4名战斗角色
-- 4种战斗定位
-- 基础能力和标签
+- 3 名默认生活角色和可扩充的生活候选池
+- 4 名默认战斗角色，正式编队为 1～4 人
+- 4 种战斗定位
+- 基础能力、特性和双线等级成长
 
 ### 冒险
 
@@ -1132,204 +1136,211 @@ MVP优先：
 
 # 16. 当前原型状态
 
-根据最近确认内容：
+截至 2026-07-29，代码已完成 Stage 12F，当前是“可运行、可存档、可回归”
+的玩法原型，而不再只是战斗表现原型。
 
-1. 村庄场景和野外探索方向已建立。
-2. 战斗基础流程已基本实现。
-3. 角色、普通怪物和Boss已有待机、攻击、受击、死亡表现。
-4. 树精Boss与火元素Boss已有基础视觉资源。
-5. 当前优先级已经从单纯完善表现，转向建立玩法成长线。
+已实现：
 
-Codex必须先检查仓库确认实际完成度，不得只依据本节推断代码状态。
+1. 统一游戏日与资源状态；远征行动会推进村庄生产、建设、制造和治疗。
+2. 村庄总览、农田、食物制造所、医院、武器制造所、民居，以及科研所和
+   资源收集所的建筑入口与状态展示。科研所和资源收集所的新生产玩法尚未实现。
+3. 远征准备、1～4 人正式编队、补给配置、节点移动、采集、普通战斗、Boss
+   战斗、主动返程和失败结算。
+4. 回合战斗、技能、装备、特性、伤势、基础战斗特效、玩家/怪物表现、投射物、
+   镜头反馈和音频框架。
+5. 正式角色统一由 `CharacterRoster` 管理；战斗角色和生活角色不建立第二套
+   正式仓库。
+6. 战斗经验、生活工作经验、连续升级、属性成长、50 级上限和属性边界保护。
+7. 生活角色岗位、效率、工作反馈、候选生成、锁定、刷新、招募、民居容量和
+   解雇；岗位运行态位于 `buildings[*].jobs`，候选运行态位于
+   `GameState.life_recruitment_state`。
+8. 战斗结算逐角色成长反馈，建筑详情最近工作结果，轻量通知和明确的操作失败
+   原因；高风险刷新和解雇具备确认流程。
+9. 生活角色稳定头像路径/外观 ID、缺失资源统一回退、状态文字和角色页面整理。
+10. Stage 12 主要数值集中在 `Stage12BalanceConfig`；存档版本为 v6，支持
+    v0～v5 迁移和非法数据修复。
+11. 主界面底部功能栏已提供“战斗角色”和“生活角色”入口；生活角色页内可进入
+    招募页面。
+12. Stage 8～12F 共 22 个 Smoke 入口已完成独立进程回归。
+
+当前尚未完成或仍为原型：
+
+- 正式存档选择/继续游戏界面、自动存档策略和多存档槽；
+- 科研所与资源收集所的新生产玩法；
+- 第二个完整区域章节及对应后勤差异；
+- 正式生活角色头像、完整动画、完整音频和最终 UI 美术；
+- 大规模数值平衡、正式新手引导和完整可访问性检查；
+- Stage 11B 高频战斗表现 Smoke 在 Godot `--verbose` 退出路径上的原生
+  signal 11 问题仍需隔离。
+
+具体代码边界、测试命令和已知问题以
+[`codex_handoff_overall.md`](codex_handoff_overall.md) 为准。Codex 仍必须
+检查仓库确认实际完成度，不得只依据本节推断代码状态。
 
 ---
 
 # 17. 推荐开发阶段
 
-## 阶段A：统一游戏状态与时间
+Stage 8～12F 已经完成统一时间、村庄生产、补给消耗、远征反哺、森林/遗迹
+节点、装备制造、双角色体系、岗位、招募、成长反馈和 v6 存档。后续阶段不应
+重新建立这些系统。
+
+## Stage 13A：稳定性与发布前基础
 
 目标：
 
-- 建立统一游戏时间
-- 冒险行动可以推进时间
-- 村庄生产可以按时间结算
-- 保存当前日期和资源
+- 为 Stage 11B 原生崩溃建立最小复现，区分引擎/驱动问题与项目对象生命周期；
+- 建立一条统一的全量 Smoke 执行入口和清晰的失败摘要；
+- 评估正式存档入口、继续游戏、自动存档时机和存档损坏提示；
+- 清理高频退出资源泄漏、重复信号连接和长期运行后通知堆积。
 
 验收：
 
-- 在野外推进3天后回村，村庄正确获得3天产出。
-- 菜单停留不会推进时间。
+- 正常运行和普通 headless 回归不出现新增错误；
+- 全量回归可用单一命令稳定执行并指出失败脚本；
+- 存档失败不会静默丢失进度。
 
-## 阶段B：最小村庄生产循环
+## Stage 13B：实玩调优与信息体验
 
 目标：
 
-- 农田产粮
-- 资源所产木材/石材
-- 食物坊生产干粮
-- 岗位角色影响效率
+- 基于 `Stage12BalanceConfig` 采样前 10～20 个游戏日的资源、经验、招募和
+  建设曲线；
+- 调整界面信息层级、列表滚动、通知合并和关键操作可见性；
+- 用正式资源逐步替换生活角色占位头像，并保持旧存档路径回退；
+- 补充最小新手引导与键鼠操作提示。
 
 验收：
 
-- 玩家能配置岗位和队列。
-- 生产结果可预测、可结算、可保存。
+- 玩家无需查看调试信息即可完成招募、排岗、备战、远征、返程和成长；
+- 主要资源不会在正常玩法中长期失去用途或形成不可恢复的负循环；
+- 高频生产反馈不会淹没战斗、招募和失败提示。
 
-## 阶段C：冒险补给与消耗
+## Stage 13C：选择一个内容主题
 
-目标：
+稳定性和基础体验通过后，只选择以下一个方向形成下一阶段闭环：
 
-- 出发前携带干粮和药物
-- 移动和战斗消耗时间与补给
-- 补给不足时限制继续探索
+1. 科研所：用现有远征成果解锁少量配方或全局改良；
+2. 资源收集所：补齐木材/石材等基础建设资源的岗位生产；
+3. 第二章节：在复用远征与战斗框架的前提下增加一种明确的区域后勤差异。
 
-验收：
-
-- 村庄生产的物资能直接影响远征距离和安全性。
-
-## 阶段D：冒险产出反哺村庄
-
-目标：
-
-- 战斗和节点掉落材料
-- 获得图纸或科技资料
-- 回村解锁新配方或升级
-
-验收：
-
-- 完成一次远征后，玩家能获得至少一个明显成长选择。
-
-## 阶段E：完整森林章节
-
-目标：
-
-- 森林节点图
-- 普通怪物
-- 树精Boss
-- 区域奖励
-- 通关后自动派遣
-
-验收：
-
-- 从开局到击败Boss形成可重复测试的完整闭环。
-
-## 阶段F：角色、装备与标签扩展
-
-目标：
-
-- 完善角色能力
-- 装备制造
-- 少量特殊标签
-- 队伍搭配差异
-
-## 阶段G：第二章节
-
-目标：
-
-- 火山区域
-- 抗热后勤
-- 火元素Boss
-- 新装备和科技
+一次只推进一个主题，并在开始前定义资源入口、消耗出口、存档字段和专项回归。
+疲劳、心情、自动排班、关系、角色合成、抽卡保底和大型天赋树继续延后，避免
+同时扩张多个角色子系统。
 
 ---
 
-# 18. 推荐 Godot 数据与模块结构
+# 18. 当前 Godot 数据与模块结构
 
-> 以下是建议，不代表必须重构现有项目。Codex应优先适配当前仓库。
+> 本节记录 Stage 12F 稳定边界。后续可以拆分大型脚本，但不得复制权威状态。
 
-## 18.1 核心单例建议
+## 18.1 核心编排与系统
 
-- `GameState`：全局进度、当前日期、章节状态
-- `TimeSystem`：时间推进与结算通知
-- `InventorySystem`：资源、道具、装备库存
-- `VillageSystem`：建筑、岗位、生产队列
-- `ExpeditionSystem`：队伍、补给、地图进度
-- `SaveManager`：存档与读档
-- `EventBus`：跨系统事件
+- `/root/GameState`：唯一自动加载入口，保存全局运行状态、编排领域系统并
+  发送跨页面刷新信号；
+- `CharacterRoster`：全部正式战斗/生活角色的唯一仓库；
+- `BuildingSystem`：建筑定义适配、岗位槽和 `buildings[*].jobs` 运行态；
+- `LifeRecruitmentSystem`：唯一候选池生成、刷新、锁定、招募和容量事务；
+- `SaveSystem`：v6 序列化、默认文件读写和 v0～v5 迁移；
+- `VillageSystem`、`FarmSystem`、`FoodWorkshopSystem`、`ForgeSystem`、
+  `HospitalSystem`、`ProjectSystem`：村庄日结与生产；
+- `ExpeditionSystem`：队伍、补给、节点、采集和返程；
+- `BattleSystem`：战斗数值和胜负的唯一计算来源。
 
-## 18.2 数据资源建议
+当前没有独立 `TimeSystem`、`SaveManager` 或 `EventBus` 自动加载。新功能应
+通过现有 `GameState` API 和信号接入；如后续确需拆分，必须先迁移调用和存档，
+不能保留两套并行真源。
 
-可使用 Godot `Resource` 或集中JSON配置：
+## 18.2 正式数据边界
 
-- `CharacterData`
-- `CharacterRuntimeState`
-- `BuildingData`
-- `BuildingRuntimeState`
-- `RecipeData`
-- `ItemData`
-- `EquipmentData`
-- `SkillData`
-- `MonsterData`
-- `MapNodeData`
-- `RegionData`
-- `TechnologyData`
-- `TraitData`
+- 正式角色：`CharacterRoster` 中的 `CharacterRecord`，按角色类型持有
+  `CombatCharacterData` 或 `LifeCharacterData`；
+- 角色静态/基础数据和运行状态目前在同一正式记录内分层保存，旧
+  `adventurers`、`character_runtime_states` 仅作兼容；
+- 岗位：`GameState.buildings[*].jobs`；
+- 招募候选：`GameState.life_recruitment_state`；
+- 建筑、食谱、装备、技能和怪物定义继续使用现有 `scripts/data/` 类型或领域
+  系统配置；
+- Stage 12 角色、岗位、招募、成长和边界数值集中在
+  `scripts/data/stage12_balance_config.gd`；
+- 正式日期推进只调用 `GameState.advance_day(reason)`；
+- UI 只查询和请求操作，不保存第二份正式业务状态。
 
-静态配置与运行状态必须分离。
+静态配置与运行状态仍应在字段和职责上清晰分离，但不得为了形式分层再创建
+重复的正式角色、成长、招募或岗位系统。
 
-## 18.3 推荐目录
+## 18.3 当前目录
 
 ```text
 res://
+├─ autoload/       # GameState
 ├─ assets/
-├─ scenes/
+├─ features/
+│  ├─ main/
 │  ├─ village/
-│  ├─ adventure/
-│  ├─ battle/
-│  ├─ characters/
-│  └─ ui/
-├─ scripts/
-│  ├─ core/
-│  ├─ village/
-│  ├─ adventure/
+│  ├─ expedition/
 │  ├─ battle/
 │  └─ ui/
-├─ data/
-│  ├─ characters/
-│  ├─ buildings/
-│  ├─ items/
-│  ├─ skills/
-│  ├─ monsters/
-│  ├─ regions/
-│  └─ technologies/
-└─ saves/
+├─ scripts/data/   # 正式数据类型与集中配置
+├─ systems/        # 领域规则
+├─ tools/          # Smoke 与资源处理工具
+└─ docs/
 ```
 
-## 18.4 关键事件建议
+存档使用 `user://adventure_village_save.json`，不在 `res://` 下创建运行时
+`saves/` 目录。
+
+## 18.4 关键事件与信号
+
+当前跨页面刷新由 `GameState` 信号承担，主要包括：
 
 ```text
-time_advanced(days)
-production_completed(building_id, recipe_id)
-research_completed(technology_id)
-expedition_started(team_id, region_id)
-map_node_resolved(node_id, result)
-battle_finished(result)
-expedition_returned(report)
-character_injured(character_id, injury)
-item_unlocked(item_id)
-building_upgraded(building_id, level)
+day_advanced(new_day)
+daily_report_generated(report)
+building_state_changed(building_id)
+expedition_started / expedition_action_completed / expedition_ended
+battle_started(encounter_id) / battle_finished(result)
+character_roster_changed
+life_job_assignments_changed(building_id)
+life_work_settled(building_id, results)
+life_recruitment_candidates_changed
+gameplay_notification_added(notification)
 ```
+
+新增信号前先确认现有 `state_changed`、领域信号或通知能否覆盖，避免同一状态
+变化通过多条重复信号触发页面重建。
 
 ---
 
 # 19. 数据示例
 
-以下示例只用于表达字段，不要求直接照搬。
+以下是当前正式数据的简化示意，省略了部分兼容字段。实际序列化以
+`CharacterRecord.to_dictionary()`、各领域状态和 `SaveSystem` 为准。
 
 ## 19.1 生活角色
 
 ```json
 {
-  "id": "worker_blacksmith_01",
-  "name": "阿石",
-  "role_type": "worker",
-  "abilities": {
-    "forging": 78,
-    "gathering": 42,
-    "research": 25
-  },
-  "traits": ["master_craft_hint"],
-  "assigned_building": "weapon_workshop",
-  "status": "working"
+  "character_id": "life_000004",
+  "character_type_name": "life",
+  "display_name": "林禾",
+  "portrait_path": "res://assets/art/characters/life_portraits/life_green.svg",
+  "quality_name": "common",
+  "level": 1,
+  "experience": 0,
+  "life_data": {
+    "life_stats": {
+      "farming": 48,
+      "crafting": 27,
+      "gathering": 31,
+      "research": 24,
+      "medical": 19
+    },
+    "life_trait_ids": ["seasoned_farmer"],
+    "assigned_building_id": "farm",
+    "assigned_job_id": "farmer",
+    "work_state_name": "working"
+  }
 }
 ```
 
@@ -1337,20 +1348,20 @@ building_upgraded(building_id, level)
 
 ```json
 {
-  "id": "adventurer_warrior_01",
-  "name": "洛恩",
-  "role_type": "adventurer",
-  "class_id": "warrior",
-  "combat_stats": {
-    "strength": 75,
-    "intelligence": 20,
-    "vitality": 80,
-    "speed": 45
-  },
-  "traits": ["tough_skin"],
-  "equipment": {
-    "weapon": "iron_sword",
-    "armor": "leather_armor"
+  "character_id": "guard",
+  "character_type_name": "combat",
+  "display_name": "阿盾",
+  "level": 3,
+  "experience": 40,
+  "combat_data": {
+    "profession_id": "guard",
+    "current_hp": 40,
+    "equipped_weapon_instance_id": "equipment_000001",
+    "skill_ids": ["shield_bash"],
+    "combat_trait_ids": [],
+    "is_in_party": true,
+    "party_slot": 0,
+    "injury_state": "healthy"
   }
 }
 ```
@@ -1359,16 +1370,15 @@ building_upgraded(building_id, level)
 
 ```json
 {
-  "id": "farm",
+  "building_id": "farm",
   "level": 1,
-  "worker_slots": 1,
-  "production_queue": [
+  "jobs": [
     {
-      "recipe_id": "grow_wheat",
-      "remaining_days": 2
+      "job_id": "farmer",
+      "job_type": "farming",
+      "character_id": "life_000004"
     }
-  ],
-  "policy": "village_supply"
+  ]
 }
 ```
 
@@ -1396,7 +1406,7 @@ building_upgraded(building_id, level)
 
 1. 在村庄安排生产。
 2. 制作至少一种冒险补给。
-3. 选择四名冒险者出发。
+3. 选择 1～4 名冒险者出发。
 4. 探索至少三个节点。
 5. 完成一次战斗。
 6. 时间推进且村庄同步生产。
@@ -1428,14 +1438,14 @@ building_upgraded(building_id, level)
 
 1. 最终目标是传送门、灯塔还是其他大型工程。
 2. 标签是否保留蓝、紫、橙品质。
-3. 战斗使用技能冷却还是技能点。
-4. 是否保留战斗中使用消耗品。
-5. 酒馆招募券占多大比重。
-6. 导师学习的具体时长和继承规则。
-7. 建筑改造是可逆、永久二选一，还是允许多分支共存。
-8. 装备耐久是否进入正式版本。
-9. 自动派遣是否允许角色受伤。
-10. 前后排8个位置的具体站位规则。
+3. 生活候选是否增加按游戏日自动刷新，以及和手动刷新的关系。
+4. 导师学习的具体时长和继承规则。
+5. 建筑改造是可逆、永久二选一，还是允许多分支共存。
+6. 装备耐久是否进入正式版本。
+7. 自动派遣是否允许角色受伤。
+8. 前后排 8 个位置的具体站位规则。
+9. 第二章节优先采用哪一种区域后勤约束。
+10. 科研所与资源收集所谁先进入正式生产闭环。
 
 ---
 
