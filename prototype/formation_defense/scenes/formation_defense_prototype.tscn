@@ -1,9 +1,10 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=9 format=3]
 
-[ext_resource type="Script" path="res://prototype/formation_defense/scripts/formation_defense_prototype.gd" id="1_prototype"]
+[ext_resource type="Script" path="res://prototype/formation_defense/scripts/formation_defense_prototype.gd" id="1_controller"]
+[ext_resource type="Script" path="res://prototype/formation_defense/scripts/formation_defense_route_view.gd" id="2_routes"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBox_battlefield"]
-bg_color = Color(0.0705882, 0.105882, 0.156863, 1)
+bg_color = Color(0.054902, 0.0823529, 0.12549, 1)
 border_width_left = 3
 border_width_top = 3
 border_width_right = 3
@@ -14,8 +15,24 @@ corner_radius_top_right = 18
 corner_radius_bottom_right = 18
 corner_radius_bottom_left = 18
 
+[sub_resource type="StyleBoxFlat" id="StyleBox_status"]
+bg_color = Color(0.0705882, 0.109804, 0.168627, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.196078, 0.286275, 0.396078, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+content_margin_left = 14.0
+content_margin_top = 10.0
+content_margin_right = 14.0
+content_margin_bottom = 10.0
+
 [sub_resource type="StyleBoxFlat" id="StyleBox_spawn"]
-bg_color = Color(0.521569, 0.160784, 0.188235, 1)
+bg_color = Color(0.521569, 0.160784, 0.188235, 0.94)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
@@ -27,7 +44,7 @@ corner_radius_bottom_right = 12
 corner_radius_bottom_left = 12
 
 [sub_resource type="StyleBoxFlat" id="StyleBox_village"]
-bg_color = Color(0.117647, 0.384314, 0.270588, 1)
+bg_color = Color(0.117647, 0.384314, 0.270588, 0.96)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
@@ -38,7 +55,7 @@ corner_radius_top_right = 16
 corner_radius_bottom_right = 16
 corner_radius_bottom_left = 16
 
-[sub_resource type="StyleBoxFlat" id="StyleBox_notice"]
+[sub_resource type="StyleBoxFlat" id="StyleBox_result"]
 bg_color = Color(0.0862745, 0.129412, 0.192157, 1)
 border_width_left = 1
 border_width_top = 1
@@ -57,8 +74,19 @@ corner_radius_top_right = 12
 corner_radius_bottom_right = 12
 corner_radius_bottom_left = 12
 content_margin_left = 16.0
-content_margin_top = 8.0
+content_margin_top = 7.0
 content_margin_right = 16.0
+content_margin_bottom = 7.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_control"]
+bg_color = Color(0.0627451, 0.0941176, 0.145098, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+content_margin_left = 12.0
+content_margin_top = 8.0
+content_margin_right = 12.0
 content_margin_bottom = 8.0
 
 [node name="FormationDefensePrototype" type="Control"]
@@ -68,7 +96,7 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-script = ExtResource("1_prototype")
+script = ExtResource("1_controller")
 
 [node name="Background" type="ColorRect" parent="."]
 layout_mode = 1
@@ -85,26 +113,26 @@ layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 64.0
-offset_top = 42.0
-offset_right = -64.0
-offset_bottom = -42.0
+offset_left = 48.0
+offset_top = 26.0
+offset_right = -48.0
+offset_bottom = -26.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_constants/margin_left = 12
-theme_override_constants/margin_top = 12
-theme_override_constants/margin_right = 12
-theme_override_constants/margin_bottom = 12
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
 
 [node name="Content" type="VBoxContainer" parent="RootMargin"]
 layout_mode = 2
-theme_override_constants/separation = 14
+theme_override_constants/separation = 10
 
 [node name="Title" type="Label" parent="RootMargin/Content"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.898039, 0.945098, 1, 1)
-theme_override_font_sizes/font_size = 42
+theme_override_font_sizes/font_size = 34
 text = "Combat V2 阵型塔防原型"
 horizontal_alignment = 1
 
@@ -114,18 +142,114 @@ layout_mode = 2
 size_flags_horizontal = 4
 theme_override_styles/normal = SubResource("StyleBox_stage")
 theme_override_colors/font_color = Color(0.690196, 0.839216, 1, 1)
-theme_override_font_sizes/font_size = 22
-text = "V2-0 原型环境"
+theme_override_font_sizes/font_size = 18
+text = "V2-1 三路基础循环"
 horizontal_alignment = 1
+
+[node name="StatusPanel" type="PanelContainer" parent="RootMargin/Content"]
+custom_minimum_size = Vector2(0, 70)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBox_status")
+
+[node name="StatusRow" type="HBoxContainer" parent="RootMargin/Content/StatusPanel"]
+layout_mode = 2
+theme_override_constants/separation = 18
+
+[node name="DurabilityLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.431373, 1, 0.670588, 1)
+theme_override_font_sizes/font_size = 18
+text = "村庄耐久：10/10"
+vertical_alignment = 1
+
+[node name="StateLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 17
+text = "当前状态：READY"
+vertical_alignment = 1
+
+[node name="GeneratedLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 17
+text = "已生成：0/6"
+vertical_alignment = 1
+
+[node name="ActiveLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 17
+text = "场上敌人：0"
+vertical_alignment = 1
+
+[node name="ResolvedLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 17
+text = "已解决：0"
+vertical_alignment = 1
+
+[node name="ScenarioLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 17
+text = "当前方案：生存演示"
+horizontal_alignment = 2
+vertical_alignment = 1
+
+[node name="ControlPanel" type="PanelContainer" parent="RootMargin/Content"]
+custom_minimum_size = Vector2(0, 54)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBox_control")
+
+[node name="ControlRow" type="HBoxContainer" parent="RootMargin/Content/ControlPanel"]
+layout_mode = 2
+theme_override_constants/separation = 12
+alignment = 1
+
+[node name="ScenarioCaption" type="Label" parent="RootMargin/Content/ControlPanel/ControlRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 17
+text = "测试方案"
+vertical_alignment = 1
+
+[node name="ScenarioOption" type="OptionButton" parent="RootMargin/Content/ControlPanel/ControlRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(220, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 17
+
+[node name="StartButton" type="Button" parent="RootMargin/Content/ControlPanel/ControlRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(150, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 17
+text = "开始"
+
+[node name="RestartButton" type="Button" parent="RootMargin/Content/ControlPanel/ControlRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(150, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 17
+text = "重新开始"
 
 [node name="Battlefield" type="PanelContainer" parent="RootMargin/Content"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 650)
+custom_minimum_size = Vector2(0, 570)
 layout_mode = 2
 size_flags_vertical = 3
 theme_override_styles/panel = SubResource("StyleBox_battlefield")
 
 [node name="BattlefieldContent" type="Control" parent="RootMargin/Content/Battlefield"]
+unique_name_in_owner = true
 layout_mode = 2
 mouse_filter = 2
 
@@ -133,188 +257,131 @@ mouse_filter = 2
 layout_mode = 1
 anchors_preset = 10
 anchor_right = 1.0
-offset_top = 18.0
-offset_bottom = 54.0
+offset_top = 12.0
+offset_bottom = 42.0
 grow_horizontal = 2
 theme_override_colors/font_color = Color(0.556863, 0.67451, 0.8, 1)
-theme_override_font_sizes/font_size = 20
-text = "战场占位区域"
+theme_override_font_sizes/font_size = 17
+text = "三路软路线 · 敌人由右向左汇入同一个村庄入口"
 horizontal_alignment = 1
 
-[node name="LaneTop" type="ColorRect" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
+[node name="RouteView" type="Control" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
+unique_name_in_owner = true
 layout_mode = 1
-anchors_preset = -1
-anchor_left = 0.11
-anchor_top = 0.19
-anchor_right = 0.83
-anchor_bottom = 0.31
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-color = Color(0.156863, 0.227451, 0.32549, 0.75)
+script = ExtResource("2_routes")
 
-[node name="LaneMiddle" type="ColorRect" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
+[node name="EnemyLayer" type="Node2D" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
+unique_name_in_owner = true
+z_index = 5
+
+[node name="VillageEntrance" type="PanelContainer" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
+unique_name_in_owner = true
+z_index = 8
 layout_mode = 1
 anchors_preset = -1
-anchor_left = 0.11
-anchor_top = 0.44
-anchor_right = 0.83
-anchor_bottom = 0.56
+anchor_left = 0.015
+anchor_top = 0.37
+anchor_right = 0.17
+anchor_bottom = 0.63
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-color = Color(0.156863, 0.227451, 0.32549, 0.75)
+theme_override_styles/panel = SubResource("StyleBox_village")
 
-[node name="LaneBottom" type="ColorRect" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
-layout_mode = 1
-anchors_preset = -1
-anchor_left = 0.11
-anchor_top = 0.69
-anchor_right = 0.83
-anchor_bottom = 0.81
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-color = Color(0.156863, 0.227451, 0.32549, 0.75)
-
-[node name="TopLaneHint" type="Label" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
-layout_mode = 1
-anchors_preset = -1
-anchor_left = 0.2
-anchor_top = 0.2
-anchor_right = 0.72
-anchor_bottom = 0.3
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_colors/font_color = Color(0.541176, 0.658824, 0.784314, 1)
+[node name="Label" type="Label" parent="RootMargin/Content/Battlefield/BattlefieldContent/VillageEntrance"]
+layout_mode = 2
 theme_override_font_sizes/font_size = 19
-text = "→   路线占位   →"
-horizontal_alignment = 1
-vertical_alignment = 1
-
-[node name="MiddleLaneHint" type="Label" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
-layout_mode = 1
-anchors_preset = -1
-anchor_left = 0.2
-anchor_top = 0.45
-anchor_right = 0.72
-anchor_bottom = 0.55
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_colors/font_color = Color(0.541176, 0.658824, 0.784314, 1)
-theme_override_font_sizes/font_size = 19
-text = "→   路线占位   →"
-horizontal_alignment = 1
-vertical_alignment = 1
-
-[node name="BottomLaneHint" type="Label" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
-layout_mode = 1
-anchors_preset = -1
-anchor_left = 0.2
-anchor_top = 0.7
-anchor_right = 0.72
-anchor_bottom = 0.8
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_colors/font_color = Color(0.541176, 0.658824, 0.784314, 1)
-theme_override_font_sizes/font_size = 19
-text = "→   路线占位   →"
+text = "共同终点\n村庄入口"
 horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="SpawnPortTop" type="PanelContainer" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
 unique_name_in_owner = true
+z_index = 8
 layout_mode = 1
 anchors_preset = -1
-anchor_left = 0.015
-anchor_top = 0.17
-anchor_right = 0.14
-anchor_bottom = 0.33
+anchor_left = 0.855
+anchor_top = 0.11
+anchor_right = 0.985
+anchor_bottom = 0.29
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBox_spawn")
 
 [node name="Label" type="Label" parent="RootMargin/Content/Battlefield/BattlefieldContent/SpawnPortTop"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 18
-text = "刷怪口 A\n占位"
+theme_override_font_sizes/font_size = 17
+text = "上路刷怪口"
 horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="SpawnPortMiddle" type="PanelContainer" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
 unique_name_in_owner = true
+z_index = 8
 layout_mode = 1
 anchors_preset = -1
-anchor_left = 0.015
-anchor_top = 0.42
-anchor_right = 0.14
-anchor_bottom = 0.58
+anchor_left = 0.855
+anchor_top = 0.41
+anchor_right = 0.985
+anchor_bottom = 0.59
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBox_spawn")
 
 [node name="Label" type="Label" parent="RootMargin/Content/Battlefield/BattlefieldContent/SpawnPortMiddle"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 18
-text = "刷怪口 B\n占位"
+theme_override_font_sizes/font_size = 17
+text = "中路刷怪口"
 horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="SpawnPortBottom" type="PanelContainer" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
 unique_name_in_owner = true
+z_index = 8
 layout_mode = 1
 anchors_preset = -1
-anchor_left = 0.015
-anchor_top = 0.67
-anchor_right = 0.14
-anchor_bottom = 0.83
+anchor_left = 0.855
+anchor_top = 0.71
+anchor_right = 0.985
+anchor_bottom = 0.89
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBox_spawn")
 
 [node name="Label" type="Label" parent="RootMargin/Content/Battlefield/BattlefieldContent/SpawnPortBottom"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 18
-text = "刷怪口 C\n占位"
-horizontal_alignment = 1
-vertical_alignment = 1
-
-[node name="VillageEntrance" type="PanelContainer" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
-unique_name_in_owner = true
-layout_mode = 1
-anchors_preset = -1
-anchor_left = 0.82
-anchor_top = 0.34
-anchor_right = 0.98
-anchor_bottom = 0.66
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_styles/panel = SubResource("StyleBox_village")
-
-[node name="Label" type="Label" parent="RootMargin/Content/Battlefield/BattlefieldContent/VillageEntrance"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 22
-text = "村庄入口\n占位"
+theme_override_font_sizes/font_size = 17
+text = "下路刷怪口"
 horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="Notice" type="PanelContainer" parent="RootMargin/Content"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 62)
+custom_minimum_size = Vector2(0, 54)
 layout_mode = 2
-theme_override_styles/panel = SubResource("StyleBox_notice")
+theme_override_styles/panel = SubResource("StyleBox_result")
 
-[node name="Label" type="Label" parent="RootMargin/Content/Notice"]
+[node name="ResultLabel" type="Label" parent="RootMargin/Content/Notice"]
+unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.72549, 0.780392, 0.85098, 1)
-theme_override_font_sizes/font_size = 20
-text = "本场景暂未实现战斗逻辑"
+theme_override_font_sizes/font_size = 18
+text = "准备就绪：选择测试方案后开始"
 horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="IsolationHint" type="Label" parent="RootMargin/Content"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.407843, 0.505882, 0.619608, 1)
-theme_override_font_sizes/font_size = 15
-text = "独立原型 · 不接入正式玩法数据 · 不写入存档"
+theme_override_font_sizes/font_size = 14
+text = "V2-1独立原型 · 无角色战斗 · 不接入正式玩法数据 · 不写入存档"
 horizontal_alignment = 1

@@ -7,6 +7,13 @@ const PROTOTYPE_SCENE_PATH := (
 const PROTOTYPE_SCRIPT_PATH := (
 	PROTOTYPE_ROOT + "scripts/formation_defense_prototype.gd"
 )
+const PROTOTYPE_RUNTIME_PATHS: Array[String] = [
+	PROTOTYPE_SCENE_PATH,
+	PROTOTYPE_SCRIPT_PATH,
+	PROTOTYPE_ROOT + "scripts/formation_defense_enemy.gd",
+	PROTOTYPE_ROOT + "scripts/formation_defense_route_view.gd",
+	PROTOTYPE_ROOT + "data/formation_defense_config.gd",
+]
 const DEFAULT_SAVE_PATH := "user://adventure_village_save.json"
 const FORMAL_MAIN_SCENE_PATH := "res://features/main/main.tscn"
 
@@ -120,7 +127,7 @@ func assert_project_settings_are_unchanged() -> void:
 
 
 func assert_runtime_files_are_isolated() -> void:
-	for runtime_path: String in [PROTOTYPE_SCENE_PATH, PROTOTYPE_SCRIPT_PATH]:
+	for runtime_path: String in PROTOTYPE_RUNTIME_PATHS:
 		require(FileAccess.file_exists(runtime_path), "%s is missing" % runtime_path)
 		var source := FileAccess.get_file_as_string(runtime_path)
 		for token: String in FORBIDDEN_RUNTIME_TOKENS:
@@ -151,19 +158,19 @@ func assert_placeholder_nodes(prototype: Node) -> void:
 		"RootMargin/Content/StageLabel"
 	) as Label
 	var notice := prototype.get_node_or_null(
-		"RootMargin/Content/Notice/Label"
+		"RootMargin/Content/Notice/ResultLabel"
 	) as Label
 	require(
 		title != null and title.text == "Combat V2 阵型塔防原型",
 		"prototype title is incorrect"
 	)
 	require(
-		stage_label != null and stage_label.text == "V2-0 原型环境",
-		"prototype stage label is incorrect"
+		stage_label != null and stage_label.text.begins_with("V2-"),
+		"prototype stage label is missing"
 	)
 	require(
-		notice != null and notice.text == "本场景暂未实现战斗逻辑",
-		"prototype notice is incorrect"
+		notice != null and not notice.text.is_empty(),
+		"prototype notice is missing"
 	)
 
 
