@@ -143,7 +143,7 @@ size_flags_horizontal = 4
 theme_override_styles/normal = SubResource("StyleBox_stage")
 theme_override_colors/font_color = Color(0.690196, 0.839216, 1, 1)
 theme_override_font_sizes/font_size = 18
-text = "V2-1 三路基础循环"
+text = "V2-2 角色部署与基础自动战斗"
 horizontal_alignment = 1
 
 [node name="StatusPanel" type="PanelContainer" parent="RootMargin/Content"]
@@ -151,9 +151,11 @@ custom_minimum_size = Vector2(0, 70)
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBox_status")
 
-[node name="StatusRow" type="HBoxContainer" parent="RootMargin/Content/StatusPanel"]
+[node name="StatusRow" type="GridContainer" parent="RootMargin/Content/StatusPanel"]
 layout_mode = 2
-theme_override_constants/separation = 18
+theme_override_constants/h_separation = 18
+theme_override_constants/v_separation = 6
+columns = 4
 
 [node name="DurabilityLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow"]
 unique_name_in_owner = true
@@ -186,6 +188,22 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 17
 text = "场上敌人：0"
+vertical_alignment = 1
+
+[node name="KilledLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 17
+text = "已击杀：0"
+vertical_alignment = 1
+
+[node name="LeakedLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 17
+text = "已漏怪：0"
 vertical_alignment = 1
 
 [node name="ResolvedLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow"]
@@ -241,9 +259,59 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 17
 text = "重新开始"
 
+[node name="DeploymentPanel" type="PanelContainer" parent="RootMargin/Content"]
+custom_minimum_size = Vector2(0, 104)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBox_control")
+
+[node name="DeploymentContent" type="VBoxContainer" parent="RootMargin/Content/DeploymentPanel"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="DeploymentHeader" type="HBoxContainer" parent="RootMargin/Content/DeploymentPanel/DeploymentContent"]
+layout_mode = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="SelectedCharacterLabel" type="Label" parent="RootMargin/Content/DeploymentPanel/DeploymentContent/DeploymentHeader"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(330, 34)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.690196, 0.839216, 1, 1)
+theme_override_font_sizes/font_size = 16
+text = "当前选择：战士"
+vertical_alignment = 1
+
+[node name="RecommendButton" type="Button" parent="RootMargin/Content/DeploymentPanel/DeploymentContent/DeploymentHeader"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(132, 34)
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "推荐部署"
+
+[node name="ClearDeploymentButton" type="Button" parent="RootMargin/Content/DeploymentPanel/DeploymentContent/DeploymentHeader"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(132, 34)
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "清空部署"
+
+[node name="UndeployButton" type="Button" parent="RootMargin/Content/DeploymentPanel/DeploymentContent/DeploymentHeader"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(132, 34)
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "撤下所选"
+
+[node name="CharacterCardRow" type="HBoxContainer" parent="RootMargin/Content/DeploymentPanel/DeploymentContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 10
+alignment = 1
+
 [node name="Battlefield" type="PanelContainer" parent="RootMargin/Content"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 570)
+custom_minimum_size = Vector2(0, 420)
 layout_mode = 2
 size_flags_vertical = 3
 theme_override_styles/panel = SubResource("StyleBox_battlefield")
@@ -262,7 +330,7 @@ offset_bottom = 42.0
 grow_horizontal = 2
 theme_override_colors/font_color = Color(0.556863, 0.67451, 0.8, 1)
 theme_override_font_sizes/font_size = 17
-text = "三路软路线 · 敌人由右向左汇入同一个村庄入口"
+text = "三路软路线 · 点击角色卡后选择部署点 · 角色自动攻击与治疗"
 horizontal_alignment = 1
 
 [node name="RouteView" type="Control" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
@@ -276,9 +344,24 @@ grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("2_routes")
 
+[node name="DeploymentLayer" type="Control" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
+unique_name_in_owner = true
+z_index = 3
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+
 [node name="EnemyLayer" type="Node2D" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
 unique_name_in_owner = true
 z_index = 5
+
+[node name="CharacterLayer" type="Node2D" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
+unique_name_in_owner = true
+z_index = 6
 
 [node name="VillageEntrance" type="PanelContainer" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
 unique_name_in_owner = true
@@ -375,7 +458,7 @@ unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.72549, 0.780392, 0.85098, 1)
 theme_override_font_sizes/font_size = 18
-text = "准备就绪：选择测试方案后开始"
+text = "准备就绪：可部署0～4名角色后开始"
 horizontal_alignment = 1
 vertical_alignment = 1
 
@@ -383,5 +466,5 @@ vertical_alignment = 1
 layout_mode = 2
 theme_override_colors/font_color = Color(0.407843, 0.505882, 0.619608, 1)
 theme_override_font_sizes/font_size = 14
-text = "V2-1独立原型 · 无角色战斗 · 不接入正式玩法数据 · 不写入存档"
+text = "V2-2独立原型 · 固定原型角色与确定性自动战斗 · 不接入正式玩法数据 · 不写入存档"
 horizontal_alignment = 1
