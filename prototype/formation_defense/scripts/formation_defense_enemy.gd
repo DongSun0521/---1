@@ -11,13 +11,25 @@ signal attacked_blocker(
 	character_id: StringName,
 	damage: int
 )
+signal damage_resolved(
+	enemy_id: StringName,
+	raw_damage: int,
+	applied_damage: int,
+	damage_source_type: StringName,
+	ranged_reduction: float
+)
 
 const BODY_RADIUS := 13.0
 const HEALTH_BAR_WIDTH := 34.0
 
 var runtime_id: StringName = &""
 var route_id: StringName = &""
+var spawn_point_id: StringName = &""
+var route_group_id: StringName = &""
+var formation_route_index := 0
+var blocking_lane_id: StringName = &""
 var spawn_sequence := 0
+var monster_type: StringName = &"charge"
 var move_speed := 0.0
 var leak_damage := 0
 var route_progress := 0.0
@@ -36,8 +48,30 @@ var route_points := PackedVector2Array()
 var segment_lengths := PackedFloat32Array()
 var total_route_length := 0.0
 var traveled_distance := 0.0
+var base_route_position := Vector2.ZERO
 var body_color := Color.WHITE
 var hit_flash_remaining := 0.0
+
+var formation_id: StringName = &""
+var formation_level: StringName = &"SINGLE"
+var formation_state: StringName = &"NONE"
+var formation_progress := 0.0
+var current_formation_effect: Dictionary = {}
+var formation_speed_multiplier := 1.0
+var formation_ranged_reduction := 0.0
+var protection_ranged_reduction := 0.0
+var formation_can_participate := true
+var formation_zone_id: StringName = &""
+var formation_zone_type: StringName = &""
+var formation_slot_target := Vector2.ZERO
+var formation_slot_active := false
+var formation_steering_offset := Vector2.ZERO
+var formation_temporary_speed_multiplier := 1.0
+var last_damage_source_type: StringName = &"UNSPECIFIED"
+var last_raw_damage := 0
+var last_applied_damage := 0
+var last_ranged_reduction := 0.0
+var total_damage_prevented := 0
 
 
 func configure(
@@ -50,11 +84,24 @@ func configure(
 	new_body_color: Color,
 	new_max_health: int,
 	new_attack_damage: int,
-	new_attack_interval: float
+	new_attack_interval: float,
+	new_monster_type: StringName = &"charge",
+	new_spawn_point_id: StringName = &"",
+	new_route_group_id: StringName = &"",
+	new_blocking_lane_id: StringName = &"",
+	new_formation_route_index: int = 0
 ) -> void:
 	runtime_id = new_runtime_id
 	route_id = new_route_id
+	spawn_point_id = new_spawn_point_id
+	route_group_id = new_route_group_id
+	formation_route_index = new_formation_route_index
+	blocking_lane_id = (
+		new_blocking_lane_id
+		if new_blocking_lane_id != &"" else new_route_id
+	)
 	spawn_sequence = new_spawn_sequence
+	monster_type = new_monster_type
 	move_speed = maxf(0.0, new_move_speed)
 	leak_damage = maxi(0, new_leak_damage)
 	body_color = new_body_color
@@ -70,6 +117,19 @@ func configure(
 	route_progress = 0.0
 	traveled_distance = 0.0
 	hit_flash_remaining = 0.0
+	formation_can_participate = true
+	last_damage_source_type = &"UNSPECIFIED"
+	last_raw_damage = 0
+	last_applied_damage = 0
+	last_ranged_reduction = 0.0
+	total_damage_prevented = 0
+	formation_steering_offset = Vector2.ZERO
+	formation_slot_target = Vector2.ZERO
+	formation_slot_active = false
+	formation_temporary_speed_multiplier = 1.0
+	formation_zone_id = &""
+	formation_zone_type = &""
+	reset_formation_state()
 	set_route_points(new_route_points, false)
 	queue_redraw()
 
@@ -91,7 +151,8 @@ func set_route_points(
 		traveled_distance / total_route_length
 		if total_route_length > 0.0 else 0.0
 	)
-	position = get_position_at_distance(traveled_distance)
+	base_route_position = get_position_at_distance(traveled_distance)
+	position = base_route_position + formation_steering_offset
 
 
 func advance(delta: float) -> void:
@@ -105,10 +166,16 @@ func advance(delta: float) -> void:
 		return
 	traveled_distance = minf(
 		total_route_length,
-		traveled_distance + move_speed * maxf(0.0, delta)
+		traveled_distance + get_effective_move_speed() * maxf(0.0, delta)
 	)
 	route_progress = traveled_distance / total_route_length
-	position = get_position_at_distance(traveled_distance)
+	base_route_position = get_position_at_distance(traveled_distance)
+	if not formation_slot_active:
+		formation_steering_offset = formation_steering_offset.move_toward(
+			Vector2.ZERO,
+			65.0 * maxf(0.0, delta)
+		)
+	position = base_route_position + formation_steering_offset
 	if traveled_distance < total_route_length:
 		return
 	settlement_completed = true
@@ -158,14 +225,37 @@ func clear_blocker(character_id: StringName = &"") -> void:
 	queue_redraw()
 
 
-func take_damage(amount: int) -> int:
+func take_damage(
+	amount: int,
+	damage_source_type: StringName = &"UNSPECIFIED"
+) -> int:
 	if settlement_completed or is_dead or amount <= 0:
 		return 0
+	var reduction := (
+		get_effective_ranged_reduction()
+		if damage_source_type == &"RANGED" else 0.0
+	)
+	var reduced_amount := maxi(
+		1,
+		roundi(float(amount) * (1.0 - clampf(reduction, 0.0, 0.95)))
+	)
 	var previous_health := current_health
-	current_health = maxi(0, current_health - amount)
+	current_health = maxi(0, current_health - reduced_amount)
 	var applied := previous_health - current_health
+	last_damage_source_type = damage_source_type
+	last_raw_damage = amount
+	last_applied_damage = applied
+	last_ranged_reduction = reduction
+	total_damage_prevented += maxi(0, amount - applied)
 	hit_flash_remaining = 0.12
 	queue_redraw()
+	damage_resolved.emit(
+		runtime_id,
+		amount,
+		applied,
+		damage_source_type,
+		reduction
+	)
 	if current_health <= 0:
 		is_dead = true
 		settlement_completed = true
@@ -181,6 +271,116 @@ func cancel() -> void:
 	settlement_completed = true
 	blocked_by_character_id = &""
 	current_attack_cooldown = 0.0
+	reset_formation_state()
+
+
+func apply_formation_state(
+	new_formation_id: StringName,
+	new_formation_level: StringName,
+	new_formation_state: StringName,
+	new_formation_progress: float,
+	effect: Dictionary
+) -> void:
+	formation_id = new_formation_id
+	formation_level = new_formation_level
+	formation_state = new_formation_state
+	formation_progress = clampf(new_formation_progress, 0.0, 1.0)
+	current_formation_effect = effect.duplicate(true)
+	formation_speed_multiplier = maxf(
+		0.0,
+		float(current_formation_effect.get("move_speed_multiplier", 1.0))
+	)
+	formation_ranged_reduction = clampf(
+		float(current_formation_effect.get("ranged_damage_reduction", 0.0)),
+		0.0,
+		0.95
+	)
+	queue_redraw()
+
+
+func reset_formation_state() -> void:
+	formation_id = &""
+	formation_level = &"SINGLE"
+	formation_state = &"NONE"
+	formation_progress = 0.0
+	current_formation_effect.clear()
+	formation_speed_multiplier = 1.0
+	formation_ranged_reduction = 0.0
+	protection_ranged_reduction = 0.0
+	clear_formation_slot_target()
+	queue_redraw()
+
+
+func set_formation_zone(
+	new_zone_id: StringName,
+	new_zone_type: StringName
+) -> void:
+	formation_zone_id = new_zone_id
+	formation_zone_type = new_zone_type
+
+
+func apply_formation_slot_target(
+	target_position: Vector2,
+	delta: float,
+	slot_move_speed: float,
+	temporary_speed_multiplier: float
+) -> float:
+	formation_slot_active = true
+	formation_slot_target = target_position
+	formation_temporary_speed_multiplier = maxf(
+		0.0,
+		temporary_speed_multiplier
+	)
+	var target_offset := target_position - base_route_position
+	var offset_delta := target_offset - formation_steering_offset
+	var safe_delta := maxf(0.0, delta)
+	var safe_speed := maxf(0.0, slot_move_speed)
+	var x_speed := safe_speed if offset_delta.x <= 0.0 else safe_speed * 0.20
+	formation_steering_offset.x = move_toward(
+		formation_steering_offset.x,
+		target_offset.x,
+		x_speed * safe_delta
+	)
+	formation_steering_offset.y = move_toward(
+		formation_steering_offset.y,
+		target_offset.y,
+		safe_speed * safe_delta
+	)
+	position = base_route_position + formation_steering_offset
+	queue_redraw()
+	return position.distance_to(target_position)
+
+
+func clear_formation_slot_target() -> void:
+	formation_slot_target = Vector2.ZERO
+	formation_slot_active = false
+	formation_temporary_speed_multiplier = 1.0
+
+
+func set_debug_world_position(new_position: Vector2) -> void:
+	base_route_position = get_position_at_distance(traveled_distance)
+	formation_steering_offset = new_position - base_route_position
+	position = new_position
+
+
+func set_protection_ranged_reduction(reduction: float) -> void:
+	protection_ranged_reduction = maxf(
+		protection_ranged_reduction,
+		clampf(reduction, 0.0, 0.95)
+	) if reduction > 0.0 else 0.0
+	queue_redraw()
+
+
+func get_effective_move_speed() -> float:
+	return (
+		move_speed
+		* formation_speed_multiplier
+		* formation_temporary_speed_multiplier
+	)
+
+
+func get_effective_ranged_reduction() -> float:
+	return maxf(formation_ranged_reduction, protection_ranged_reduction)
 
 
 func tick_visual(delta: float) -> void:
@@ -211,8 +411,14 @@ func get_runtime_snapshot() -> Dictionary:
 	return {
 		"runtime_id": runtime_id,
 		"route_id": route_id,
+		"spawn_point_id": spawn_point_id,
+		"route_group_id": route_group_id,
+		"formation_route_index": formation_route_index,
+		"blocking_lane_id": blocking_lane_id,
 		"spawn_sequence": spawn_sequence,
+		"monster_type": monster_type,
 		"move_speed": move_speed,
+		"effective_move_speed": get_effective_move_speed(),
 		"leak_damage": leak_damage,
 		"route_progress": route_progress,
 		"settlement_completed": settlement_completed,
@@ -224,6 +430,29 @@ func get_runtime_snapshot() -> Dictionary:
 		"blocked_by_character_id": blocked_by_character_id,
 		"is_dead": is_dead,
 		"death_settlement_completed": death_settlement_completed,
+		"formation_id": formation_id,
+		"formation_level": formation_level,
+		"formation_state": formation_state,
+		"formation_progress": formation_progress,
+		"current_formation_effect": current_formation_effect.duplicate(true),
+		"formation_speed_multiplier": formation_speed_multiplier,
+		"formation_ranged_reduction": formation_ranged_reduction,
+		"protection_ranged_reduction": protection_ranged_reduction,
+		"effective_ranged_reduction": get_effective_ranged_reduction(),
+		"formation_can_participate": formation_can_participate,
+		"formation_zone_id": formation_zone_id,
+		"formation_zone_type": formation_zone_type,
+		"formation_slot_target": formation_slot_target,
+		"formation_slot_active": formation_slot_active,
+		"formation_steering_offset": formation_steering_offset,
+		"formation_temporary_speed_multiplier":
+			formation_temporary_speed_multiplier,
+		"base_route_position": base_route_position,
+		"last_damage_source_type": last_damage_source_type,
+		"last_raw_damage": last_raw_damage,
+		"last_applied_damage": last_applied_damage,
+		"last_ranged_reduction": last_ranged_reduction,
+		"total_damage_prevented": total_damage_prevented,
 		"position": position,
 	}
 
@@ -236,6 +465,22 @@ func _draw() -> void:
 	)
 	draw_circle(Vector2.ZERO, BODY_RADIUS + 3.0, Color(0.03, 0.05, 0.08, 0.85))
 	draw_circle(Vector2.ZERO, BODY_RADIUS, visible_color)
+	if monster_type == &"charge":
+		draw_colored_polygon(
+			PackedVector2Array([
+				Vector2(-2.0, -8.0),
+				Vector2(10.0, 0.0),
+				Vector2(-2.0, 8.0),
+			]),
+			Color(1.0, 0.84, 0.52, 0.92)
+		)
+	else:
+		draw_rect(
+			Rect2(Vector2(-7.0, -8.0), Vector2(14.0, 16.0)),
+			Color(0.72, 0.91, 1.0, 0.9),
+			false,
+			2.0
+		)
 	draw_circle(Vector2(-4.0, -4.0), 3.0, Color(1.0, 1.0, 1.0, 0.78))
 	if blocked_by_character_id != &"":
 		draw_arc(
@@ -258,3 +503,18 @@ func _draw() -> void:
 		Rect2(health_origin, Vector2(HEALTH_BAR_WIDTH * health_ratio, 5.0)),
 		Color(0.94, 0.34, 0.38, 1.0)
 	)
+	if formation_state != &"NONE":
+		var formation_text := (
+			"%s %d%%" % [String(formation_level), int(round(formation_progress * 100.0))]
+			if formation_state != &"COMPLETE"
+			else String(formation_level)
+		)
+		draw_string(
+			ThemeDB.fallback_font,
+			Vector2(-22.0, 34.0),
+			formation_text,
+			HORIZONTAL_ALIGNMENT_CENTER,
+			44.0,
+			12,
+			Color(1.0, 0.92, 0.62, 0.92)
+		)

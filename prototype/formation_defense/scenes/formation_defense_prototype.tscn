@@ -1,7 +1,8 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=10 format=3]
 
 [ext_resource type="Script" path="res://prototype/formation_defense/scripts/formation_defense_prototype.gd" id="1_controller"]
 [ext_resource type="Script" path="res://prototype/formation_defense/scripts/formation_defense_route_view.gd" id="2_routes"]
+[ext_resource type="Script" path="res://prototype/formation_defense/scripts/formation_defense_formation_manager.gd" id="3_formations"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBox_battlefield"]
 bg_color = Color(0.054902, 0.0823529, 0.12549, 1)
@@ -143,7 +144,7 @@ size_flags_horizontal = 4
 theme_override_styles/normal = SubResource("StyleBox_stage")
 theme_override_colors/font_color = Color(0.690196, 0.839216, 1, 1)
 theme_override_font_sizes/font_size = 18
-text = "V2-2 角色部署与基础自动战斗"
+text = "V2-3 怪物组阵系统"
 horizontal_alignment = 1
 
 [node name="StatusPanel" type="PanelContainer" parent="RootMargin/Content"]
@@ -259,6 +260,20 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 17
 text = "重新开始"
 
+[node name="FormationStatusPanel" type="PanelContainer" parent="RootMargin/Content"]
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBox_control")
+
+[node name="FormationStatsLabel" type="Label" parent="RootMargin/Content/FormationStatusPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.78, 0.86, 0.96, 1)
+theme_override_font_sizes/font_size = 15
+text = "单体 0｜FORMING_A 0｜A阵 0｜FORMING_B 0｜B阵 0｜A完成 0｜B完成 0｜中断 0｜降级 0"
+horizontal_alignment = 1
+vertical_alignment = 1
+
 [node name="DeploymentPanel" type="PanelContainer" parent="RootMargin/Content"]
 custom_minimum_size = Vector2(0, 104)
 layout_mode = 2
@@ -330,11 +345,12 @@ offset_bottom = 42.0
 grow_horizontal = 2
 theme_override_colors/font_color = Color(0.556863, 0.67451, 0.8, 1)
 theme_override_font_sizes/font_size = 17
-text = "三路软路线 · 点击角色卡后选择部署点 · 角色自动攻击与治疗"
+text = "五条兼容组阵轨（索引0～4）· 邻轨跨度0/1/2可调 · 锁定后双向靠拢"
 horizontal_alignment = 1
 
 [node name="RouteView" type="Control" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
 unique_name_in_owner = true
+z_index = 2
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -354,6 +370,11 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 1
+
+[node name="FormationLayer" type="Node2D" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
+unique_name_in_owner = true
+z_index = 4
+script = ExtResource("3_formations")
 
 [node name="EnemyLayer" type="Node2D" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
 unique_name_in_owner = true
@@ -386,7 +407,7 @@ vertical_alignment = 1
 
 [node name="SpawnPortTop" type="PanelContainer" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
 unique_name_in_owner = true
-z_index = 8
+z_index = 1
 layout_mode = 1
 anchors_preset = -1
 anchor_left = 0.855
@@ -401,13 +422,13 @@ theme_override_styles/panel = SubResource("StyleBox_spawn")
 [node name="Label" type="Label" parent="RootMargin/Content/Battlefield/BattlefieldContent/SpawnPortTop"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 17
-text = "上路刷怪口"
+text = "上方入口群"
 horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="SpawnPortMiddle" type="PanelContainer" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
 unique_name_in_owner = true
-z_index = 8
+z_index = 1
 layout_mode = 1
 anchors_preset = -1
 anchor_left = 0.855
@@ -422,13 +443,13 @@ theme_override_styles/panel = SubResource("StyleBox_spawn")
 [node name="Label" type="Label" parent="RootMargin/Content/Battlefield/BattlefieldContent/SpawnPortMiddle"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 17
-text = "中路刷怪口"
+text = "中部入口群"
 horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="SpawnPortBottom" type="PanelContainer" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
 unique_name_in_owner = true
-z_index = 8
+z_index = 1
 layout_mode = 1
 anchors_preset = -1
 anchor_left = 0.855
@@ -443,7 +464,7 @@ theme_override_styles/panel = SubResource("StyleBox_spawn")
 [node name="Label" type="Label" parent="RootMargin/Content/Battlefield/BattlefieldContent/SpawnPortBottom"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 17
-text = "下路刷怪口"
+text = "下方入口群"
 horizontal_alignment = 1
 vertical_alignment = 1
 
@@ -466,5 +487,5 @@ vertical_alignment = 1
 layout_mode = 2
 theme_override_colors/font_color = Color(0.407843, 0.505882, 0.619608, 1)
 theme_override_font_sizes/font_size = 14
-text = "V2-2独立原型 · 固定原型角色与确定性自动战斗 · 不接入正式玩法数据 · 不写入存档"
+text = "V2-3独立原型 · 怪物仍为独立单位 · 不含集火/大招 · 不接入正式玩法数据与存档"
 horizontal_alignment = 1

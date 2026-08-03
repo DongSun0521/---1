@@ -22,6 +22,7 @@ var total_effect_amount := 0
 var attack_damage := 0
 var heal_amount := 0
 var block_capacity := 0
+var damage_source_type: StringName = &"UNSPECIFIED"
 var blocked_enemy_ids: Array[StringName] = []
 var body_color := Color.WHITE
 var show_action_range := false
@@ -38,6 +39,9 @@ func configure(new_character_id: StringName, definition: Dictionary) -> void:
 	attack_damage = maxi(0, int(definition.get("attack_damage", 0)))
 	heal_amount = maxi(0, int(definition.get("heal_amount", 0)))
 	block_capacity = maxi(0, int(definition.get("block_capacity", 0)))
+	damage_source_type = StringName(
+		definition.get("damage_source_type", &"UNSPECIFIED")
+	)
 	body_color = definition.get("body_color", Color.WHITE)
 	name = "PrototypeCharacter_%s" % String(character_id)
 	reset_combat_state()
@@ -172,7 +176,9 @@ func simulate_action(
 		current_target_id = &""
 		return {}
 	current_target_id = attack_target.runtime_id
-	var dealt := int(attack_target.take_damage(attack_damage))
+	var dealt := int(
+		attack_target.take_damage(attack_damage, damage_source_type)
+	)
 	if dealt <= 0:
 		return {}
 	current_cooldown = action_interval
@@ -272,6 +278,7 @@ func get_runtime_snapshot() -> Dictionary:
 		"attack_damage": attack_damage,
 		"heal_amount": heal_amount,
 		"block_capacity": block_capacity,
+		"damage_source_type": damage_source_type,
 		"blocked_enemy_ids": blocked_enemy_ids.duplicate(),
 		"last_action_type": last_action_type,
 	}
