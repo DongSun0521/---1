@@ -14,6 +14,9 @@ const PrototypeCharacter := preload(
 const PrototypeDeploymentSlot := preload(
 	"res://prototype/formation_defense/scripts/formation_defense_deployment_slot.gd"
 )
+const PrototypeProjectileVisual := preload(
+	"res://prototype/formation_defense/scripts/formation_defense_projectile_visual.gd"
+)
 
 enum BattleState {
 	READY,
@@ -30,11 +33,15 @@ const STATE_NAMES := {
 }
 
 @onready var battlefield_content: Control = %BattlefieldContent
+@onready var battlefield: PanelContainer = %Battlefield
+@onready var stage_label: Label = %StageLabel
 @onready var route_view: Control = %RouteView
 @onready var deployment_layer: Control = %DeploymentLayer
 @onready var formation_manager: Node2D = %FormationLayer
+@onready var command_controller: Node = %CommandController
 @onready var enemy_layer: Node2D = %EnemyLayer
 @onready var character_layer: Node2D = %CharacterLayer
+@onready var projectile_visual_layer: Node2D = %ProjectileVisualLayer
 @onready var durability_label: Label = %DurabilityLabel
 @onready var state_label: Label = %StateLabel
 @onready var generated_label: Label = %GeneratedLabel
@@ -44,6 +51,7 @@ const STATE_NAMES := {
 @onready var resolved_label: Label = %ResolvedLabel
 @onready var scenario_label: Label = %ScenarioLabel
 @onready var formation_stats_label: Label = %FormationStatsLabel
+@onready var command_status_label: Label = %CommandStatusLabel
 @onready var scenario_option: OptionButton = %ScenarioOption
 @onready var start_button: Button = %StartButton
 @onready var restart_button: Button = %RestartButton
@@ -89,9 +97,12 @@ var formation_damage_prevented_total := 0
 var speed_effect_observed_ids: Dictionary = {}
 var demo_control_resistance_triggered := false
 var battle_elapsed := 0.0
+var attack_visual_spawn_count := 0
 
 
 func _ready() -> void:
+	command_controller.bind_runtime(self)
+	stage_label.text = "V2-4 集火与拆阵指挥"
 	setup_scenario_options()
 	setup_deployment_slots()
 	setup_character_roster()
@@ -101,13 +112,68 @@ func _ready() -> void:
 	recommend_button.pressed.connect(apply_recommended_deployment)
 	clear_deployment_button.pressed.connect(clear_deployment)
 	undeploy_button.pressed.connect(undeploy_selected_character)
+	battlefield.gui_input.connect(on_battlefield_gui_input)
 	battlefield_content.resized.connect(on_battlefield_resized)
 	restart_battle()
 
 
 func _process(delta: float) -> void:
+	update_hover_target()
 	if automatic_simulation:
 		simulate_step(delta)
+
+
+func _exit_tree() -> void:
+	if is_instance_valid(command_controller):
+		command_controller.handle_battle_end(&"SCENE_EXIT")
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo \
+			and event.keycode == KEY_ESCAPE:
+		command_controller.cancel_command(&"PLAYER_CANCEL")
+		update_ui()
+		get_viewport().set_input_as_handled()
+		return
+	if not event is InputEventMouseButton or not event.pressed:
+		return
+	if event.button_index == MOUSE_BUTTON_RIGHT:
+		command_controller.cancel_command(&"PLAYER_CANCEL")
+		update_ui()
+		get_viewport().set_input_as_handled()
+
+
+func on_battlefield_gui_input(event: InputEvent) -> void:
+	if not event is InputEventMouseButton or not event.pressed:
+		return
+	var viewport_position: Vector2 = (
+		battlefield.get_global_transform_with_canvas() * event.position
+	)
+	var local_position: Vector2 = (
+		battlefield_content.get_global_transform_with_canvas().affine_inverse()
+		* viewport_position
+	)
+	if handle_battlefield_pointer(local_position, event.button_index):
+		battlefield.accept_event()
+
+
+func handle_battlefield_pointer(
+	local_position: Vector2,
+	button_index: MouseButton
+) -> bool:
+	if button_index == MOUSE_BUTTON_RIGHT:
+		command_controller.cancel_command(&"PLAYER_CANCEL")
+		update_ui()
+		return true
+	if button_index != MOUSE_BUTTON_LEFT \
+			or battle_state != BattleState.RUNNING:
+		return false
+	var enemy = pick_enemy_at(local_position)
+	if is_instance_valid(enemy):
+		command_controller.issue_command(StringName(enemy.runtime_id))
+		update_ui()
+		return true
+	return false
 
 
 func setup_scenario_options() -> void:
@@ -330,10 +396,12 @@ func start_battle() -> bool:
 	speed_effect_observed_ids.clear()
 	demo_control_resistance_triggered = false
 	battle_elapsed = 0.0
+	attack_visual_spawn_count = 0
 	formation_manager.reset_runtime(
 		is_formation_scenario_enabled(),
 		run_sequence
 	)
+	command_controller.reset_for_restart()
 	battle_state = BattleState.RUNNING
 	spawn_next_enemy()
 	update_ui()
@@ -371,10 +439,12 @@ func restart_battle() -> void:
 	speed_effect_observed_ids.clear()
 	demo_control_resistance_triggered = false
 	battle_elapsed = 0.0
+	attack_visual_spawn_count = 0
 	formation_manager.reset_runtime(
 		is_formation_scenario_enabled(),
 		run_sequence
 	)
+	command_controller.reset_for_restart()
 	update_ui()
 
 
@@ -412,6 +482,7 @@ func simulate_step(delta: float) -> void:
 	if battle_state == BattleState.RUNNING:
 		formation_manager.update_formations(safe_delta, active_enemies)
 		run_formation_demo_control_resistance()
+		command_controller.process_command(safe_delta)
 	update_enemy_blocking()
 	if battle_state == BattleState.RUNNING:
 		simulate_character_actions(safe_delta)
@@ -650,13 +721,65 @@ func simulate_character_actions(delta: float) -> void:
 		if battle_state != BattleState.RUNNING:
 			break
 		var character = character_nodes[character_id]
-		var action: Dictionary = character.simulate_action(delta, enemies, allies)
+		var action: Dictionary = character.simulate_action(
+			delta, enemies, allies, command_controller
+		)
 		if action.is_empty():
 			continue
 		if StringName(action.get("type", &"")) == &"heal":
 			healing_event_count += 1
 		else:
 			character_attack_event_count += 1
+			spawn_attack_visual(action)
+			if battle_state != BattleState.RUNNING:
+				clear_attack_visuals()
+
+
+func spawn_attack_visual(action: Dictionary) -> Node2D:
+	if StringName(action.get("type", &"")) != &"attack":
+		return null
+	var role_id := StringName(action.get("role_id", &""))
+	if role_id == &"doctor":
+		return null
+	var origin: Vector2 = action.get("origin_position", Vector2.ZERO)
+	var target: Vector2 = action.get("target_position", origin)
+	var direction := (target - origin).normalized()
+	var visual_start := origin + direction * 18.0
+	var visual_kind := PrototypeProjectileVisual.KIND_ARROW
+	if role_id == &"guard":
+		visual_kind = PrototypeProjectileVisual.KIND_MELEE
+	elif role_id == &"mage":
+		visual_kind = PrototypeProjectileVisual.KIND_MAGIC
+	var visual = PrototypeProjectileVisual.new()
+	visual.configure(
+		StringName(action.get("source_id", &"")),
+		StringName(action.get("target_id", &"")),
+		int(action.get("attack_sequence_id", 0)),
+		visual_kind,
+		visual_start,
+		target
+	)
+	projectile_visual_layer.add_child(visual)
+	attack_visual_spawn_count += 1
+	return visual
+
+
+func clear_attack_visuals() -> void:
+	if not is_instance_valid(projectile_visual_layer):
+		return
+	for visual in projectile_visual_layer.get_children():
+		projectile_visual_layer.remove_child(visual)
+		visual.queue_free()
+
+
+func get_attack_visual_snapshots() -> Array[Dictionary]:
+	var snapshots: Array[Dictionary] = []
+	if not is_instance_valid(projectile_visual_layer):
+		return snapshots
+	for visual in projectile_visual_layer.get_children():
+		if is_instance_valid(visual) and visual.has_method("get_debug_snapshot"):
+			snapshots.append(visual.get_debug_snapshot())
+	return snapshots
 
 
 func handle_enemy_damage_resolved(
@@ -726,6 +849,7 @@ func handle_enemy_death(enemy_id: StringName) -> void:
 		PrototypeConfig.INTERRUPTION_MEMBER_DIED,
 		active_enemies
 	)
+	command_controller.handle_enemy_removed(enemy_id, &"KILLED")
 	settled_enemy_ids[enemy_id] = &"killed"
 	enemy.mark_death_settled()
 	killed_enemy_count += 1
@@ -755,6 +879,7 @@ func handle_enemy_arrival(
 		PrototypeConfig.INTERRUPTION_MEMBER_LEAKED,
 		active_enemies
 	)
+	command_controller.handle_enemy_removed(enemy_id, &"LEAKED")
 	settled_enemy_ids[enemy_id] = &"leaked"
 	leaked_enemy_count += 1
 	resolved_enemy_count = killed_enemy_count + leaked_enemy_count
@@ -777,6 +902,7 @@ func remove_enemy(enemy_id: StringName) -> void:
 
 
 func clear_active_enemies() -> void:
+	clear_attack_visuals()
 	if is_instance_valid(formation_manager):
 		formation_manager.clear_all_formations(active_enemies)
 	for enemy in active_enemies.values():
@@ -814,6 +940,8 @@ func finish_victory() -> void:
 	if battle_state != BattleState.RUNNING or village_durability <= 0:
 		return
 	battle_state = BattleState.VICTORY
+	clear_attack_visuals()
+	command_controller.handle_battle_end(&"BATTLE_END")
 	battle_finish_count += 1
 	update_ui()
 	battle_finished.emit(&"victory")
@@ -823,6 +951,7 @@ func finish_defeat() -> void:
 	if battle_state != BattleState.RUNNING:
 		return
 	battle_state = BattleState.DEFEAT
+	command_controller.handle_battle_end(&"BATTLE_END")
 	village_durability = 0
 	battle_finish_count += 1
 	clear_active_enemies()
@@ -920,11 +1049,66 @@ func interrupt_enemy_formation(
 ) -> Dictionary:
 	if battle_state != BattleState.RUNNING or not active_enemies.has(enemy_id):
 		return {"resisted": false, "interrupted": false}
-	return formation_manager.interrupt_member(
+	var result: Dictionary = formation_manager.interrupt_member(
 		enemy_id,
 		reason,
 		active_enemies
 	)
+	command_controller.process_command(0.0)
+	return result
+
+
+func pick_enemy_at(local_position: Vector2):
+	var best_enemy = null
+	var best_distance := INF
+	for enemy in active_enemies.values():
+		if not is_instance_valid(enemy) or enemy.is_dead or enemy.settlement_completed:
+			continue
+		var distance: float = enemy.position.distance_to(local_position)
+		if distance > 24.0:
+			continue
+		if distance < best_distance - 0.0001:
+			best_enemy = enemy
+			best_distance = distance
+		elif absf(distance - best_distance) <= 0.0001 \
+				and is_enemy_pick_before(enemy, best_enemy):
+			best_enemy = enemy
+	return best_enemy
+
+
+func is_enemy_pick_before(candidate, current_best) -> bool:
+	if not is_instance_valid(current_best):
+		return true
+	if int(candidate.spawn_sequence) != int(current_best.spawn_sequence):
+		return int(candidate.spawn_sequence) < int(current_best.spawn_sequence)
+	return String(candidate.runtime_id) < String(current_best.runtime_id)
+
+
+func update_hover_target() -> void:
+	if not is_node_ready() or battle_state != BattleState.RUNNING:
+		command_controller.set_hover_target(&"")
+		return
+	var mouse_position := get_viewport().get_mouse_position()
+	if not battlefield_content.get_global_rect().has_point(mouse_position):
+		command_controller.set_hover_target(&"")
+		return
+	var local_position: Vector2 = battlefield_content.get_global_transform_with_canvas().affine_inverse() * mouse_position
+	var enemy = pick_enemy_at(local_position)
+	command_controller.set_hover_target(
+		StringName(enemy.runtime_id) if is_instance_valid(enemy) else &""
+	)
+
+
+func is_command_target_waiting_for_range() -> bool:
+	var target = active_enemies.get(command_controller.get_target_runtime_id())
+	if not is_instance_valid(target):
+		return false
+	for character in character_nodes.values():
+		if not is_instance_valid(character) or character.role_id == &"doctor":
+			continue
+		if not character.get_legal_enemy_candidates([target]).is_empty():
+			return false
+	return true
 
 
 func get_character_node(character_id: StringName):
@@ -978,10 +1162,7 @@ func is_formation_scenario_enabled() -> bool:
 
 
 func run_formation_demo_control_resistance() -> void:
-	if (
-		selected_scenario_id != &"formation_demo"
-		or demo_control_resistance_triggered
-	):
+	if demo_control_resistance_triggered:
 		return
 	var scenario := PrototypeConfig.get_scenario(selected_scenario_id)
 	if not bool(scenario.get("auto_demo_control_resistance", false)):
@@ -1053,6 +1234,10 @@ func get_battle_snapshot() -> Dictionary:
 			demo_control_resistance_triggered,
 		"formation_stats": get_formation_stats_snapshot(),
 		"formation_groups": get_formation_groups_snapshot(),
+		"command": command_controller.get_active_command_snapshot(),
+		"command_stats": command_controller.get_stats_snapshot(),
+		"attack_visual_spawn_count": attack_visual_spawn_count,
+		"attack_visuals": get_attack_visual_snapshots(),
 		"deployment": deployment_by_character.duplicate(true),
 		"characters": get_character_snapshots(),
 	}
@@ -1134,6 +1319,29 @@ func update_ui() -> void:
 		int(route_spans.get(1, 0)),
 		int(route_spans.get(2, 0)),
 	]
+	var command: Dictionary = command_controller.get_active_command_snapshot()
+	if command.is_empty():
+		command_status_label.text = (
+			"指挥：%s" % command_controller.feedback_message
+			if not command_controller.feedback_message.is_empty()
+			else "指挥：未指定目标｜左键选敌，右键或 Esc 取消"
+		)
+	else:
+		var context_name: String = command_controller.get_context_display_name(
+			StringName(command.get("context", &"FOCUS"))
+		)
+		var waiting := "｜等待进入射程" if is_command_target_waiting_for_range() else ""
+		command_status_label.text = "%s｜%s(%s)｜HP %d/%d｜阵型 %s/%s｜路线 %s%s" % [
+			context_name,
+			String(command.get("target_runtime_id", &"")),
+			String(command.get("monster_type", &"")),
+			int(command.get("target_health", 0)),
+			int(command.get("target_max_health", 0)),
+			String(command.get("formation_level", &"SINGLE")),
+			String(command.get("formation_state", &"NONE")),
+			String(command.get("route_id", &"")),
+			waiting,
+		]
 	start_button.disabled = battle_state != BattleState.READY
 	scenario_option.disabled = battle_state != BattleState.READY
 	refresh_deployment_visuals()

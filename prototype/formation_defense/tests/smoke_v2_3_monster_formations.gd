@@ -20,6 +20,8 @@ const RUNTIME_PATHS: Array[String] = [
 	PROTOTYPE_ROOT + "scripts/formation_defense_enemy.gd",
 	PROTOTYPE_ROOT + "scripts/formation_defense_formation_group.gd",
 	PROTOTYPE_ROOT + "scripts/formation_defense_formation_manager.gd",
+	PROTOTYPE_ROOT + "scripts/formation_defense_command_controller.gd",
+	PROTOTYPE_ROOT + "scripts/formation_defense_projectile_visual.gd",
 	PROTOTYPE_ROOT + "scripts/formation_defense_route_view.gd",
 	PROTOTYPE_ROOT + "data/formation_defense_config.gd",
 ]

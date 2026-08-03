@@ -949,7 +949,9 @@ func apply_group_steering(
 		var error: float = enemy.apply_formation_slot_target(
 			target_position,
 			delta,
-			PrototypeConfig.FORMATION_SLOT_MOVE_SPEED,
+			PrototypeConfig.FORMATION_SLOT_MOVE_SPEED
+				if is_forming
+				else PrototypeConfig.COMPLETE_FORMATION_SLOT_MAINTENANCE_SPEED,
 			temporary_multiplier
 		)
 		maximum_error = maxf(maximum_error, error)

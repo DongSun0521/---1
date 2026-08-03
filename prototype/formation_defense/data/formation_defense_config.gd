@@ -70,6 +70,9 @@ const A_PAIR_NEIGHBOR_ROUTE_SPAN := 2
 const B_PAIR_NEIGHBOR_ROUTE_SPAN := 2
 const FORMING_FORWARD_SPEED_MULTIPLIER := 0.78
 const FORMATION_SLOT_MOVE_SPEED := 80.0
+# Complete formations use a separate maintenance rate so tuning the convergence
+# window cannot change the movement/spacing behavior accepted in V2-3.
+const COMPLETE_FORMATION_SLOT_MAINTENANCE_SPEED := 80.0
 const FORMATION_SLOT_TOLERANCE := 7.0
 const FORMATION_MEET_TIMEOUT := 8.0
 const A_SLOT_GAP_Y := 56.0
@@ -549,6 +552,7 @@ const SCENARIO_IDS: Array[StringName] = [
 	&"defeat",
 	&"auto_battle",
 	&"formation_demo",
+	&"command_demo",
 ]
 const SCENARIOS := {
 	&"survival": {
@@ -702,6 +706,21 @@ const SCENARIOS := {
 				"max_health": 180,
 				"leak_damage": 0,
 			},
+		],
+	},
+	&"command_demo": {
+		"display_name": "V2-4 集火/拆阵",
+		"description": "复用已锁定的V2-3生成计划，供集火、阻阵与分段拆阵交互验证。",
+		"spawn_interval": 0.75,
+		"formations_enabled": true,
+		"auto_demo_control_resistance": true,
+		"inherit_spawn_plan": &"formation_demo",
+		"active_spawn_point_ids": [
+			&"spawn_upper_outer",
+			&"spawn_upper",
+			&"spawn_center",
+			&"spawn_lower",
+			&"spawn_lower_outer",
 		],
 	},
 }
@@ -1070,7 +1089,7 @@ static func get_character_definition(character_id: StringName) -> Dictionary:
 static func get_recommended_deployment(
 	scenario_id: StringName = &""
 ) -> Dictionary:
-	if scenario_id == &"formation_demo":
+	if scenario_id == &"formation_demo" or scenario_id == &"command_demo":
 		return FORMATION_DEMO_DEPLOYMENT.duplicate(true)
 	return RECOMMENDED_DEPLOYMENT.duplicate(true)
 
@@ -1085,6 +1104,9 @@ static func get_scenario(scenario_id: StringName) -> Dictionary:
 
 static func get_scenario_spawn_entries(scenario_id: StringName) -> Array[Dictionary]:
 	var scenario := get_scenario(scenario_id)
+	var inherited_plan := StringName(scenario.get("inherit_spawn_plan", &""))
+	if inherited_plan != &"" and inherited_plan != scenario_id:
+		return get_scenario_spawn_entries(inherited_plan)
 	var entries: Array[Dictionary] = []
 	if scenario.has("spawn_entries"):
 		for entry: Dictionary in scenario.get("spawn_entries", []):

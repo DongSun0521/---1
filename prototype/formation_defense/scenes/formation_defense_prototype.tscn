@@ -1,8 +1,47 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene format=3 uid="uid://cnriii7n2pf1"]
 
-[ext_resource type="Script" path="res://prototype/formation_defense/scripts/formation_defense_prototype.gd" id="1_controller"]
-[ext_resource type="Script" path="res://prototype/formation_defense/scripts/formation_defense_route_view.gd" id="2_routes"]
-[ext_resource type="Script" path="res://prototype/formation_defense/scripts/formation_defense_formation_manager.gd" id="3_formations"]
+[ext_resource type="Script" uid="uid://c6lu25emle53k" path="res://prototype/formation_defense/scripts/formation_defense_prototype.gd" id="1_controller"]
+[ext_resource type="Script" uid="uid://d3cgqi4kn2jmg" path="res://prototype/formation_defense/scripts/formation_defense_route_view.gd" id="2_routes"]
+[ext_resource type="Script" uid="uid://d34y1s1vbxebb" path="res://prototype/formation_defense/scripts/formation_defense_formation_manager.gd" id="3_formations"]
+[ext_resource type="Script" uid="uid://5k3qdgkt1uwc" path="res://prototype/formation_defense/scripts/formation_defense_command_controller.gd" id="4_commands"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_stage"]
+content_margin_left = 16.0
+content_margin_top = 7.0
+content_margin_right = 16.0
+content_margin_bottom = 7.0
+bg_color = Color(0.121569, 0.231373, 0.360784, 1)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_status"]
+content_margin_left = 14.0
+content_margin_top = 10.0
+content_margin_right = 14.0
+content_margin_bottom = 10.0
+bg_color = Color(0.0705882, 0.109804, 0.168627, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.196078, 0.286275, 0.396078, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_control"]
+content_margin_left = 12.0
+content_margin_top = 8.0
+content_margin_right = 12.0
+content_margin_bottom = 8.0
+bg_color = Color(0.0627451, 0.0941176, 0.145098, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
 
 [sub_resource type="StyleBoxFlat" id="StyleBox_battlefield"]
 bg_color = Color(0.054902, 0.0823529, 0.12549, 1)
@@ -16,21 +55,17 @@ corner_radius_top_right = 18
 corner_radius_bottom_right = 18
 corner_radius_bottom_left = 18
 
-[sub_resource type="StyleBoxFlat" id="StyleBox_status"]
-bg_color = Color(0.0705882, 0.109804, 0.168627, 1)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.196078, 0.286275, 0.396078, 1)
-corner_radius_top_left = 10
-corner_radius_top_right = 10
-corner_radius_bottom_right = 10
-corner_radius_bottom_left = 10
-content_margin_left = 14.0
-content_margin_top = 10.0
-content_margin_right = 14.0
-content_margin_bottom = 10.0
+[sub_resource type="StyleBoxFlat" id="StyleBox_village"]
+bg_color = Color(0.117647, 0.384314, 0.270588, 0.96)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.368627, 0.823529, 0.580392, 1)
+corner_radius_top_left = 16
+corner_radius_top_right = 16
+corner_radius_bottom_right = 16
+corner_radius_bottom_left = 16
 
 [sub_resource type="StyleBoxFlat" id="StyleBox_spawn"]
 bg_color = Color(0.521569, 0.160784, 0.188235, 0.94)
@@ -44,18 +79,6 @@ corner_radius_top_right = 12
 corner_radius_bottom_right = 12
 corner_radius_bottom_left = 12
 
-[sub_resource type="StyleBoxFlat" id="StyleBox_village"]
-bg_color = Color(0.117647, 0.384314, 0.270588, 0.96)
-border_width_left = 2
-border_width_top = 2
-border_width_right = 2
-border_width_bottom = 2
-border_color = Color(0.368627, 0.823529, 0.580392, 1)
-corner_radius_top_left = 16
-corner_radius_top_right = 16
-corner_radius_bottom_right = 16
-corner_radius_bottom_left = 16
-
 [sub_resource type="StyleBoxFlat" id="StyleBox_result"]
 bg_color = Color(0.0862745, 0.129412, 0.192157, 1)
 border_width_left = 1
@@ -68,29 +91,7 @@ corner_radius_top_right = 10
 corner_radius_bottom_right = 10
 corner_radius_bottom_left = 10
 
-[sub_resource type="StyleBoxFlat" id="StyleBox_stage"]
-bg_color = Color(0.121569, 0.231373, 0.360784, 1)
-corner_radius_top_left = 12
-corner_radius_top_right = 12
-corner_radius_bottom_right = 12
-corner_radius_bottom_left = 12
-content_margin_left = 16.0
-content_margin_top = 7.0
-content_margin_right = 16.0
-content_margin_bottom = 7.0
-
-[sub_resource type="StyleBoxFlat" id="StyleBox_control"]
-bg_color = Color(0.0627451, 0.0941176, 0.145098, 1)
-corner_radius_top_left = 10
-corner_radius_top_right = 10
-corner_radius_bottom_right = 10
-corner_radius_bottom_left = 10
-content_margin_left = 12.0
-content_margin_top = 8.0
-content_margin_right = 12.0
-content_margin_bottom = 8.0
-
-[node name="FormationDefensePrototype" type="Control"]
+[node name="FormationDefensePrototype" type="Control" unique_id=481748255]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -99,7 +100,11 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_controller")
 
-[node name="Background" type="ColorRect" parent="."]
+[node name="CommandController" type="Node" parent="." unique_id=604678309]
+unique_name_in_owner = true
+script = ExtResource("4_commands")
+
+[node name="Background" type="ColorRect" parent="." unique_id=1272273461]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -109,7 +114,7 @@ grow_vertical = 2
 mouse_filter = 2
 color = Color(0.0235294, 0.0392157, 0.0666667, 1)
 
-[node name="RootMargin" type="MarginContainer" parent="."]
+[node name="RootMargin" type="MarginContainer" parent="." unique_id=825812415]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -125,11 +130,11 @@ theme_override_constants/margin_top = 8
 theme_override_constants/margin_right = 8
 theme_override_constants/margin_bottom = 8
 
-[node name="Content" type="VBoxContainer" parent="RootMargin"]
+[node name="Content" type="VBoxContainer" parent="RootMargin" unique_id=1086636479]
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="Title" type="Label" parent="RootMargin/Content"]
+[node name="Title" type="Label" parent="RootMargin/Content" unique_id=1280380853]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.898039, 0.945098, 1, 1)
@@ -137,28 +142,28 @@ theme_override_font_sizes/font_size = 34
 text = "Combat V2 阵型塔防原型"
 horizontal_alignment = 1
 
-[node name="StageLabel" type="Label" parent="RootMargin/Content"]
+[node name="StageLabel" type="Label" parent="RootMargin/Content" unique_id=503463983]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 4
-theme_override_styles/normal = SubResource("StyleBox_stage")
 theme_override_colors/font_color = Color(0.690196, 0.839216, 1, 1)
 theme_override_font_sizes/font_size = 18
+theme_override_styles/normal = SubResource("StyleBox_stage")
 text = "V2-3 怪物组阵系统"
 horizontal_alignment = 1
 
-[node name="StatusPanel" type="PanelContainer" parent="RootMargin/Content"]
+[node name="StatusPanel" type="PanelContainer" parent="RootMargin/Content" unique_id=1223051835]
 custom_minimum_size = Vector2(0, 70)
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBox_status")
 
-[node name="StatusRow" type="GridContainer" parent="RootMargin/Content/StatusPanel"]
+[node name="StatusRow" type="GridContainer" parent="RootMargin/Content/StatusPanel" unique_id=1590854039]
 layout_mode = 2
 theme_override_constants/h_separation = 18
 theme_override_constants/v_separation = 6
 columns = 4
 
-[node name="DurabilityLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow"]
+[node name="DurabilityLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow" unique_id=1268599265]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -167,7 +172,7 @@ theme_override_font_sizes/font_size = 18
 text = "村庄耐久：10/10"
 vertical_alignment = 1
 
-[node name="StateLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow"]
+[node name="StateLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow" unique_id=922642971]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -175,7 +180,7 @@ theme_override_font_sizes/font_size = 17
 text = "当前状态：READY"
 vertical_alignment = 1
 
-[node name="GeneratedLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow"]
+[node name="GeneratedLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow" unique_id=930211831]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -183,7 +188,7 @@ theme_override_font_sizes/font_size = 17
 text = "已生成：0/6"
 vertical_alignment = 1
 
-[node name="ActiveLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow"]
+[node name="ActiveLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow" unique_id=215551026]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -191,7 +196,7 @@ theme_override_font_sizes/font_size = 17
 text = "场上敌人：0"
 vertical_alignment = 1
 
-[node name="KilledLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow"]
+[node name="KilledLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow" unique_id=1975081260]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -199,7 +204,7 @@ theme_override_font_sizes/font_size = 17
 text = "已击杀：0"
 vertical_alignment = 1
 
-[node name="LeakedLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow"]
+[node name="LeakedLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow" unique_id=1362703344]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -207,7 +212,7 @@ theme_override_font_sizes/font_size = 17
 text = "已漏怪：0"
 vertical_alignment = 1
 
-[node name="ResolvedLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow"]
+[node name="ResolvedLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow" unique_id=597928379]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -215,7 +220,7 @@ theme_override_font_sizes/font_size = 17
 text = "已解决：0"
 vertical_alignment = 1
 
-[node name="ScenarioLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow"]
+[node name="ScenarioLabel" type="Label" parent="RootMargin/Content/StatusPanel/StatusRow" unique_id=1599119665]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -224,48 +229,48 @@ text = "当前方案：生存演示"
 horizontal_alignment = 2
 vertical_alignment = 1
 
-[node name="ControlPanel" type="PanelContainer" parent="RootMargin/Content"]
+[node name="ControlPanel" type="PanelContainer" parent="RootMargin/Content" unique_id=211128161]
 custom_minimum_size = Vector2(0, 54)
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBox_control")
 
-[node name="ControlRow" type="HBoxContainer" parent="RootMargin/Content/ControlPanel"]
+[node name="ControlRow" type="HBoxContainer" parent="RootMargin/Content/ControlPanel" unique_id=559095519]
 layout_mode = 2
 theme_override_constants/separation = 12
 alignment = 1
 
-[node name="ScenarioCaption" type="Label" parent="RootMargin/Content/ControlPanel/ControlRow"]
+[node name="ScenarioCaption" type="Label" parent="RootMargin/Content/ControlPanel/ControlRow" unique_id=773610985]
 layout_mode = 2
 theme_override_font_sizes/font_size = 17
 text = "测试方案"
 vertical_alignment = 1
 
-[node name="ScenarioOption" type="OptionButton" parent="RootMargin/Content/ControlPanel/ControlRow"]
+[node name="ScenarioOption" type="OptionButton" parent="RootMargin/Content/ControlPanel/ControlRow" unique_id=1416499968]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(220, 40)
 layout_mode = 2
 theme_override_font_sizes/font_size = 17
 
-[node name="StartButton" type="Button" parent="RootMargin/Content/ControlPanel/ControlRow"]
+[node name="StartButton" type="Button" parent="RootMargin/Content/ControlPanel/ControlRow" unique_id=234227296]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(150, 40)
 layout_mode = 2
 theme_override_font_sizes/font_size = 17
 text = "开始"
 
-[node name="RestartButton" type="Button" parent="RootMargin/Content/ControlPanel/ControlRow"]
+[node name="RestartButton" type="Button" parent="RootMargin/Content/ControlPanel/ControlRow" unique_id=2144907267]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(150, 40)
 layout_mode = 2
 theme_override_font_sizes/font_size = 17
 text = "重新开始"
 
-[node name="FormationStatusPanel" type="PanelContainer" parent="RootMargin/Content"]
+[node name="FormationStatusPanel" type="PanelContainer" parent="RootMargin/Content" unique_id=212617762]
 custom_minimum_size = Vector2(0, 42)
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBox_control")
 
-[node name="FormationStatsLabel" type="Label" parent="RootMargin/Content/FormationStatusPanel"]
+[node name="FormationStatsLabel" type="Label" parent="RootMargin/Content/FormationStatusPanel" unique_id=33953126]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.78, 0.86, 0.96, 1)
@@ -274,21 +279,19 @@ text = "单体 0｜FORMING_A 0｜A阵 0｜FORMING_B 0｜B阵 0｜A完成 0｜B�
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="DeploymentPanel" type="PanelContainer" parent="RootMargin/Content"]
-custom_minimum_size = Vector2(0, 104)
+[node name="DeploymentPanel" type="PanelContainer" parent="RootMargin/Content" unique_id=2070637127]
 layout_mode = 2
-theme_override_styles/panel = SubResource("StyleBox_control")
 
-[node name="DeploymentContent" type="VBoxContainer" parent="RootMargin/Content/DeploymentPanel"]
+[node name="DeploymentContent" type="VBoxContainer" parent="RootMargin/Content/DeploymentPanel" unique_id=699784161]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="DeploymentHeader" type="HBoxContainer" parent="RootMargin/Content/DeploymentPanel/DeploymentContent"]
+[node name="DeploymentHeader" type="HBoxContainer" parent="RootMargin/Content/DeploymentPanel/DeploymentContent" unique_id=523865743]
 layout_mode = 2
 theme_override_constants/separation = 10
 alignment = 1
 
-[node name="SelectedCharacterLabel" type="Label" parent="RootMargin/Content/DeploymentPanel/DeploymentContent/DeploymentHeader"]
+[node name="SelectedCharacterLabel" type="Label" parent="RootMargin/Content/DeploymentPanel/DeploymentContent/DeploymentHeader" unique_id=706124567]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(330, 34)
 layout_mode = 2
@@ -297,46 +300,65 @@ theme_override_font_sizes/font_size = 16
 text = "当前选择：战士"
 vertical_alignment = 1
 
-[node name="RecommendButton" type="Button" parent="RootMargin/Content/DeploymentPanel/DeploymentContent/DeploymentHeader"]
+[node name="RecommendButton" type="Button" parent="RootMargin/Content/DeploymentPanel/DeploymentContent/DeploymentHeader" unique_id=1530773583]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(132, 34)
 layout_mode = 2
 theme_override_font_sizes/font_size = 15
 text = "推荐部署"
 
-[node name="ClearDeploymentButton" type="Button" parent="RootMargin/Content/DeploymentPanel/DeploymentContent/DeploymentHeader"]
+[node name="ClearDeploymentButton" type="Button" parent="RootMargin/Content/DeploymentPanel/DeploymentContent/DeploymentHeader" unique_id=138202559]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(132, 34)
 layout_mode = 2
 theme_override_font_sizes/font_size = 15
 text = "清空部署"
 
-[node name="UndeployButton" type="Button" parent="RootMargin/Content/DeploymentPanel/DeploymentContent/DeploymentHeader"]
+[node name="UndeployButton" type="Button" parent="RootMargin/Content/DeploymentPanel/DeploymentContent/DeploymentHeader" unique_id=818724593]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(132, 34)
 layout_mode = 2
 theme_override_font_sizes/font_size = 15
 text = "撤下所选"
 
-[node name="CharacterCardRow" type="HBoxContainer" parent="RootMargin/Content/DeploymentPanel/DeploymentContent"]
+[node name="CharacterCardRow" type="HBoxContainer" parent="RootMargin/Content/DeploymentPanel/DeploymentContent" unique_id=969745217]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 10
 alignment = 1
 
-[node name="Battlefield" type="PanelContainer" parent="RootMargin/Content"]
+[node name="CommandStatusPanel" type="PanelContainer" parent="RootMargin/Content" unique_id=2045458686]
+custom_minimum_size = Vector2(0, 54)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBox_control")
+
+[node name="CommandStatusLabel" type="Label" parent="RootMargin/Content/CommandStatusPanel" unique_id=949062485]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.78, 0.48, 1)
+theme_override_font_sizes/font_size = 15
+text = "指挥：未指定目标｜左键选敌，右键或 Esc 取消"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="DeploymentPanel2" type="PanelContainer" parent="RootMargin/Content" unique_id=2025706465]
+custom_minimum_size = Vector2(0, 104)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBox_control")
+
+[node name="Battlefield" type="PanelContainer" parent="RootMargin/Content" unique_id=1119704475]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 420)
 layout_mode = 2
 size_flags_vertical = 3
 theme_override_styles/panel = SubResource("StyleBox_battlefield")
 
-[node name="BattlefieldContent" type="Control" parent="RootMargin/Content/Battlefield"]
+[node name="BattlefieldContent" type="Control" parent="RootMargin/Content/Battlefield" unique_id=1004367434]
 unique_name_in_owner = true
 layout_mode = 2
 mouse_filter = 2
 
-[node name="BattlefieldCaption" type="Label" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
+[node name="BattlefieldCaption" type="Label" parent="RootMargin/Content/Battlefield/BattlefieldContent" unique_id=644660945]
 layout_mode = 1
 anchors_preset = 10
 anchor_right = 1.0
@@ -348,7 +370,7 @@ theme_override_font_sizes/font_size = 17
 text = "五条兼容组阵轨（索引0～4）· 邻轨跨度0/1/2可调 · 锁定后双向靠拢"
 horizontal_alignment = 1
 
-[node name="RouteView" type="Control" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
+[node name="RouteView" type="Control" parent="RootMargin/Content/Battlefield/BattlefieldContent" unique_id=1529310530]
 unique_name_in_owner = true
 z_index = 2
 layout_mode = 1
@@ -360,7 +382,7 @@ grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("2_routes")
 
-[node name="DeploymentLayer" type="Control" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
+[node name="DeploymentLayer" type="Control" parent="RootMargin/Content/Battlefield/BattlefieldContent" unique_id=428748411]
 unique_name_in_owner = true
 z_index = 3
 layout_mode = 1
@@ -371,20 +393,24 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 1
 
-[node name="FormationLayer" type="Node2D" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
+[node name="FormationLayer" type="Node2D" parent="RootMargin/Content/Battlefield/BattlefieldContent" unique_id=1544467544]
 unique_name_in_owner = true
 z_index = 4
 script = ExtResource("3_formations")
 
-[node name="EnemyLayer" type="Node2D" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
+[node name="EnemyLayer" type="Node2D" parent="RootMargin/Content/Battlefield/BattlefieldContent" unique_id=1674330170]
 unique_name_in_owner = true
 z_index = 5
 
-[node name="CharacterLayer" type="Node2D" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
+[node name="CharacterLayer" type="Node2D" parent="RootMargin/Content/Battlefield/BattlefieldContent" unique_id=421312976]
 unique_name_in_owner = true
 z_index = 6
 
-[node name="VillageEntrance" type="PanelContainer" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
+[node name="ProjectileVisualLayer" type="Node2D" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
+unique_name_in_owner = true
+z_index = 7
+
+[node name="VillageEntrance" type="PanelContainer" parent="RootMargin/Content/Battlefield/BattlefieldContent" unique_id=1331787485]
 unique_name_in_owner = true
 z_index = 8
 layout_mode = 1
@@ -398,14 +424,15 @@ grow_vertical = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBox_village")
 
-[node name="Label" type="Label" parent="RootMargin/Content/Battlefield/BattlefieldContent/VillageEntrance"]
+[node name="Label" type="Label" parent="RootMargin/Content/Battlefield/BattlefieldContent/VillageEntrance" unique_id=1409894394]
 layout_mode = 2
 theme_override_font_sizes/font_size = 19
-text = "共同终点\n村庄入口"
+text = "共同终点
+村庄入口"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="SpawnPortTop" type="PanelContainer" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
+[node name="SpawnPortTop" type="PanelContainer" parent="RootMargin/Content/Battlefield/BattlefieldContent" unique_id=654576126]
 unique_name_in_owner = true
 z_index = 1
 layout_mode = 1
@@ -419,14 +446,14 @@ grow_vertical = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBox_spawn")
 
-[node name="Label" type="Label" parent="RootMargin/Content/Battlefield/BattlefieldContent/SpawnPortTop"]
+[node name="Label" type="Label" parent="RootMargin/Content/Battlefield/BattlefieldContent/SpawnPortTop" unique_id=705507015]
 layout_mode = 2
 theme_override_font_sizes/font_size = 17
 text = "上方入口群"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="SpawnPortMiddle" type="PanelContainer" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
+[node name="SpawnPortMiddle" type="PanelContainer" parent="RootMargin/Content/Battlefield/BattlefieldContent" unique_id=1503111524]
 unique_name_in_owner = true
 z_index = 1
 layout_mode = 1
@@ -440,14 +467,14 @@ grow_vertical = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBox_spawn")
 
-[node name="Label" type="Label" parent="RootMargin/Content/Battlefield/BattlefieldContent/SpawnPortMiddle"]
+[node name="Label" type="Label" parent="RootMargin/Content/Battlefield/BattlefieldContent/SpawnPortMiddle" unique_id=1146970171]
 layout_mode = 2
 theme_override_font_sizes/font_size = 17
 text = "中部入口群"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="SpawnPortBottom" type="PanelContainer" parent="RootMargin/Content/Battlefield/BattlefieldContent"]
+[node name="SpawnPortBottom" type="PanelContainer" parent="RootMargin/Content/Battlefield/BattlefieldContent" unique_id=1210807738]
 unique_name_in_owner = true
 z_index = 1
 layout_mode = 1
@@ -461,20 +488,20 @@ grow_vertical = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBox_spawn")
 
-[node name="Label" type="Label" parent="RootMargin/Content/Battlefield/BattlefieldContent/SpawnPortBottom"]
+[node name="Label" type="Label" parent="RootMargin/Content/Battlefield/BattlefieldContent/SpawnPortBottom" unique_id=1643541172]
 layout_mode = 2
 theme_override_font_sizes/font_size = 17
 text = "下方入口群"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="Notice" type="PanelContainer" parent="RootMargin/Content"]
+[node name="Notice" type="PanelContainer" parent="RootMargin/Content" unique_id=546454326]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 54)
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBox_result")
 
-[node name="ResultLabel" type="Label" parent="RootMargin/Content/Notice"]
+[node name="ResultLabel" type="Label" parent="RootMargin/Content/Notice" unique_id=1217594181]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.72549, 0.780392, 0.85098, 1)
@@ -483,7 +510,7 @@ text = "准备就绪：可部署0～4名角色后开始"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="IsolationHint" type="Label" parent="RootMargin/Content"]
+[node name="IsolationHint" type="Label" parent="RootMargin/Content" unique_id=565554176]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.407843, 0.505882, 0.619608, 1)
 theme_override_font_sizes/font_size = 14

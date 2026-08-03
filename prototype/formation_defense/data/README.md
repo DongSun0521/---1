@@ -1,5 +1,12 @@
 # 原型数据目录
 
+## V2-4 指挥相关约定
+
+V2-4 不增加伤害、易伤、资源或正式波次数值。`command_demo` 仅继承 V2-3 已验收的
+`formation_demo` 生成计划，避免两份出生节奏漂移。`FORMATION_SLOT_MOVE_SPEED` 只用于
+FORMING_A/B 靠拢；完整阵型槽位维护使用语义独立且同为 80.0 的
+`COMPLETE_FORMATION_SLOT_MAINTENANCE_SPEED`，因此调整阻止组阵窗口不会改变完整阵型行进。
+
 Combat V2 原型数值和数据资源统一放在此目录。
 
 V2-3 使用 `formation_defense_config.gd` 集中保存村庄耐久、敌人移动/生命/攻击

@@ -72,6 +72,9 @@ var last_raw_damage := 0
 var last_applied_damage := 0
 var last_ranged_reduction := 0.0
 var total_damage_prevented := 0
+var command_is_target := false
+var command_is_related := false
+var command_is_hovered := false
 
 
 func configure(
@@ -130,6 +133,7 @@ func configure(
 	formation_zone_id = &""
 	formation_zone_type = &""
 	reset_formation_state()
+	set_command_visual(false, false, false)
 	set_route_points(new_route_points, false)
 	queue_redraw()
 
@@ -363,6 +367,17 @@ func set_debug_world_position(new_position: Vector2) -> void:
 	position = new_position
 
 
+func set_command_visual(is_target: bool, is_related: bool, is_hovered: bool) -> void:
+	if command_is_target == is_target \
+			and command_is_related == is_related \
+			and command_is_hovered == is_hovered:
+		return
+	command_is_target = is_target
+	command_is_related = is_related
+	command_is_hovered = is_hovered
+	queue_redraw()
+
+
 func set_protection_ranged_reduction(reduction: float) -> void:
 	protection_ranged_reduction = maxf(
 		protection_ranged_reduction,
@@ -454,10 +469,23 @@ func get_runtime_snapshot() -> Dictionary:
 		"last_ranged_reduction": last_ranged_reduction,
 		"total_damage_prevented": total_damage_prevented,
 		"position": position,
+		"command_is_target": command_is_target,
+		"command_is_related": command_is_related,
+		"command_is_hovered": command_is_hovered,
 	}
 
 
 func _draw() -> void:
+	if command_is_related:
+		draw_arc(Vector2.ZERO, BODY_RADIUS + 10.0, 0.0, TAU, 32, Color(1.0, 0.68, 0.20, 0.72), 2.0, true)
+	if command_is_target:
+		draw_arc(Vector2.ZERO, BODY_RADIUS + 12.0, 0.0, TAU, 32, Color(1.0, 0.16, 0.18, 1.0), 3.0, true)
+		draw_line(Vector2(-20.0, 0.0), Vector2(-8.0, 0.0), Color(1.0, 0.16, 0.18), 2.0)
+		draw_line(Vector2(8.0, 0.0), Vector2(20.0, 0.0), Color(1.0, 0.16, 0.18), 2.0)
+		draw_line(Vector2(0.0, -20.0), Vector2(0.0, -8.0), Color(1.0, 0.16, 0.18), 2.0)
+		draw_line(Vector2(0.0, 8.0), Vector2(0.0, 20.0), Color(1.0, 0.16, 0.18), 2.0)
+	if command_is_hovered:
+		draw_arc(Vector2.ZERO, BODY_RADIUS + 6.0, 0.0, TAU, 32, Color(1.0, 0.96, 0.58, 0.95), 2.0, true)
 	var visible_color := (
 		Color.WHITE
 		if hit_flash_remaining > 0.0

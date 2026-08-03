@@ -144,7 +144,8 @@ func receive_healing(amount: int) -> int:
 func simulate_action(
 	delta: float,
 	active_enemies: Array,
-	all_characters: Array
+	all_characters: Array,
+	command_controller = null
 ) -> Dictionary:
 	if not is_deployed() or not is_alive:
 		return {}
@@ -171,11 +172,14 @@ func simulate_action(
 			"target_id": current_target_id,
 			"amount": healed,
 		}
-	var attack_target = choose_enemy_target(active_enemies)
+	var attack_target = choose_enemy_target(active_enemies, command_controller)
 	if attack_target == null:
 		current_target_id = &""
 		return {}
 	current_target_id = attack_target.runtime_id
+	var resolved_target_id: StringName = attack_target.runtime_id
+	var attack_origin_position: Vector2 = position
+	var attack_target_position: Vector2 = attack_target.position
 	var dealt := int(
 		attack_target.take_damage(attack_damage, damage_source_type)
 	)
@@ -189,13 +193,26 @@ func simulate_action(
 	return {
 		"type": &"attack",
 		"source_id": character_id,
-		"target_id": current_target_id,
+		"target_id": resolved_target_id,
 		"amount": dealt,
+		"attack_sequence_id": action_count,
+		"origin_position": attack_origin_position,
+		"target_position": attack_target_position,
+		"role_id": role_id,
+		"damage_source_type": damage_source_type,
 	}
 
 
-func choose_enemy_target(active_enemies: Array):
-	var best_enemy = null
+func choose_enemy_target(active_enemies: Array, command_controller = null):
+	var legal_candidates := get_legal_enemy_candidates(active_enemies)
+	if is_instance_valid(command_controller) \
+			and command_controller.has_method("get_priority_target_for"):
+		return command_controller.get_priority_target_for(self, legal_candidates)
+	return legal_candidates[0] if not legal_candidates.is_empty() else null
+
+
+func get_legal_enemy_candidates(active_enemies: Array) -> Array:
+	var candidates: Array = []
 	for enemy in active_enemies:
 		if not is_instance_valid(enemy):
 			continue
@@ -209,9 +226,9 @@ func choose_enemy_target(active_enemies: Array):
 				continue
 		elif position.distance_to(enemy.position) > action_range:
 			continue
-		if is_better_enemy_target(enemy, best_enemy):
-			best_enemy = enemy
-	return best_enemy
+		candidates.append(enemy)
+	candidates.sort_custom(func(left, right): return is_better_enemy_target(left, right))
+	return candidates
 
 
 func is_better_enemy_target(candidate, current_best) -> bool:
