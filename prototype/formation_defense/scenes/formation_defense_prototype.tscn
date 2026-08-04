@@ -516,3 +516,142 @@ theme_override_colors/font_color = Color(0.407843, 0.505882, 0.619608, 1)
 theme_override_font_sizes/font_size = 14
 text = "V2-3独立原型 · 怪物仍为独立单位 · 不含集火/大招 · 不接入正式玩法数据与存档"
 horizontal_alignment = 1
+
+[node name="CompactHud" type="Control" parent="."]
+unique_name_in_owner = true
+z_index = 20
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="EssentialStatusPanel" type="PanelContainer" parent="CompactHud"]
+layout_mode = 0
+offset_left = 18.0
+offset_top = 18.0
+offset_right = 330.0
+offset_bottom = 112.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBox_status")
+
+[node name="Rows" type="VBoxContainer" parent="CompactHud/EssentialStatusPanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="CompactDurabilityLabel" type="Label" parent="CompactHud/EssentialStatusPanel/Rows"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.431373, 1, 0.670588, 1)
+theme_override_font_sizes/font_size = 17
+text = "村庄耐久：10/10"
+
+[node name="CompactStateLabel" type="Label" parent="CompactHud/EssentialStatusPanel/Rows"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "状态：READY"
+
+[node name="CompactWaveLabel" type="Label" parent="CompactHud/EssentialStatusPanel/Rows"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.58, 0.68, 0.78, 1)
+theme_override_font_sizes/font_size = 14
+text = "波次：V2-5 预留（未启用）"
+
+[node name="CompactCommandPanel" type="PanelContainer" parent="CompactHud"]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 18.0
+offset_top = -72.0
+offset_right = -18.0
+offset_bottom = -18.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBox_control")
+
+[node name="CompactCommandLabel" type="Label" parent="CompactHud/CompactCommandPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.78, 0.48, 1)
+theme_override_font_sizes/font_size = 15
+text = "指挥：未指定目标｜左键选敌，右键或 Esc 取消"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="DebugToggleButton" type="Button" parent="."]
+unique_name_in_owner = true
+z_index = 40
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -126.0
+offset_top = 18.0
+offset_right = -18.0
+offset_bottom = 58.0
+grow_horizontal = 0
+mouse_filter = 2
+theme_override_font_sizes/font_size = 16
+text = "调试"
+
+[node name="DebugDrawer" type="PanelContainer" parent="."]
+unique_name_in_owner = true
+visible = false
+z_index = 30
+layout_mode = 1
+anchors_preset = 11
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -500.0
+grow_horizontal = 0
+grow_vertical = 2
+mouse_filter = 0
+theme_override_styles/panel = SubResource("StyleBox_status")
+
+[node name="DrawerMargin" type="MarginContainer" parent="DebugDrawer"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="DrawerRows" type="VBoxContainer" parent="DebugDrawer/DrawerMargin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="DrawerHeader" type="HBoxContainer" parent="DebugDrawer/DrawerMargin/DrawerRows"]
+layout_mode = 2
+
+[node name="DrawerTitle" type="Label" parent="DebugDrawer/DrawerMargin/DrawerRows/DrawerHeader"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.78, 0.88, 1, 1)
+theme_override_font_sizes/font_size = 22
+text = "Combat V2 调试面板"
+
+[node name="DebugCloseButton" type="Button" parent="DebugDrawer/DrawerMargin/DrawerRows/DrawerHeader"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(86, 38)
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "关闭"
+
+[node name="DebugScroll" type="ScrollContainer" parent="DebugDrawer/DrawerMargin/DrawerRows"]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="DebugContent" type="VBoxContainer" parent="DebugDrawer/DrawerMargin/DrawerRows/DebugScroll"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(440, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8

@@ -34,11 +34,26 @@ var completed_a_route_spans: Dictionary = {}
 var completed_a_pair_modes: Dictionary = {}
 var completed_a_observations: Array[Dictionary] = []
 var completed_b_observations: Array[Dictionary] = []
+var logic_to_visual_scale := Vector2.ONE
+var visual_scale := 1.0
 
 
 func _ready() -> void:
 	z_index = 4
 	queue_redraw()
+
+
+func configure_display_mapping(
+	new_logic_to_visual_scale: Vector2,
+	new_visual_scale: float
+) -> void:
+	logic_to_visual_scale = new_logic_to_visual_scale
+	visual_scale = maxf(0.01, new_visual_scale)
+	queue_redraw()
+
+
+func map_visual_position(logic_position: Vector2) -> Vector2:
+	return logic_position * logic_to_visual_scale
 
 
 func reset_runtime(enabled: bool, new_run_sequence := 0) -> void:
@@ -1318,21 +1333,25 @@ func _draw() -> void:
 
 
 func draw_formation_group(group) -> void:
-	var positions: Array[Vector2] = []
+	var logic_positions: Array[Vector2] = []
 	for member_id: StringName in group.member_ids:
 		var enemy = last_active_enemies.get(member_id)
 		if is_valid_enemy(enemy):
-			positions.append(enemy.position)
-	if positions.size() < 2:
+			logic_positions.append(enemy.position)
+	if logic_positions.size() < 2:
 		return
+	var positions: Array[Vector2] = []
+	for logic_position: Vector2 in logic_positions:
+		positions.append(map_visual_position(logic_position))
 	var color := PrototypeConfig.get_formation_color(group.monster_type)
-	var center := Vector2.ZERO
-	for point: Vector2 in positions:
-		center += point
-	center /= float(positions.size())
+	var logic_center := Vector2.ZERO
+	for point: Vector2 in logic_positions:
+		logic_center += point
+	logic_center /= float(logic_positions.size())
+	var center := map_visual_position(logic_center)
 	if group.formation_state == PrototypeConfig.FORMATION_STATE_FORMING_A:
 		draw_line(positions[0], positions[1], Color(color, 0.62), 1.5, true)
-		draw_slot_targets(group, center, color)
+		draw_slot_targets(group, logic_center, color)
 		draw_formation_label(
 			center,
 			"A锁定靠拢 %d%%" % int(round(group.formation_progress * 100.0)),
@@ -1346,8 +1365,14 @@ func draw_formation_group(group) -> void:
 			group.source_a_member_sets[1], last_active_enemies
 		)
 		if first_center != null and second_center != null:
-			draw_line(first_center, second_center, Color(color, 0.75), 2.0, true)
-		draw_slot_targets(group, center, color)
+			draw_line(
+				map_visual_position(first_center),
+				map_visual_position(second_center),
+				Color(color, 0.75),
+				2.0,
+				true
+			)
+		draw_slot_targets(group, logic_center, color)
 		draw_formation_label(
 			center,
 			"B锁定靠拢 %d%%" % int(round(group.formation_progress * 100.0)),
@@ -1379,9 +1404,9 @@ func draw_formation_group(group) -> void:
 		)
 
 
-func draw_slot_targets(group, center: Vector2, color: Color) -> void:
+func draw_slot_targets(group, logic_center: Vector2, color: Color) -> void:
 	for slot_offset: Vector2 in group.slot_assignments.values():
-		var target := center + slot_offset
+		var target := map_visual_position(logic_center + slot_offset)
 		draw_circle(target, 4.0, Color(color, 0.28))
 		draw_arc(target, 7.0, 0.0, TAU, 16, Color(color, 0.72), 1.0, true)
 

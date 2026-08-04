@@ -31,6 +31,7 @@ const STATE_NAMES := {
 	BattleState.VICTORY: "VICTORY",
 	BattleState.DEFEAT: "DEFEAT",
 }
+const LOGICAL_BATTLEFIELD_SIZE := Vector2(1802.0, 414.0)
 
 @onready var battlefield_content: Control = %BattlefieldContent
 @onready var battlefield: PanelContainer = %Battlefield
@@ -42,6 +43,11 @@ const STATE_NAMES := {
 @onready var enemy_layer: Node2D = %EnemyLayer
 @onready var character_layer: Node2D = %CharacterLayer
 @onready var projectile_visual_layer: Node2D = %ProjectileVisualLayer
+@onready var battlefield_caption: Label = $RootMargin/Content/Battlefield/BattlefieldContent/BattlefieldCaption
+@onready var village_entrance: PanelContainer = %VillageEntrance
+@onready var spawn_port_top: PanelContainer = %SpawnPortTop
+@onready var spawn_port_middle: PanelContainer = %SpawnPortMiddle
+@onready var spawn_port_bottom: PanelContainer = %SpawnPortBottom
 @onready var durability_label: Label = %DurabilityLabel
 @onready var state_label: Label = %StateLabel
 @onready var generated_label: Label = %GeneratedLabel
@@ -61,6 +67,15 @@ const STATE_NAMES := {
 @onready var clear_deployment_button: Button = %ClearDeploymentButton
 @onready var undeploy_button: Button = %UndeployButton
 @onready var result_label: Label = %ResultLabel
+@onready var root_margin: MarginContainer = $RootMargin
+@onready var compact_durability_label: Label = %CompactDurabilityLabel
+@onready var compact_state_label: Label = %CompactStateLabel
+@onready var compact_wave_label: Label = %CompactWaveLabel
+@onready var compact_command_label: Label = %CompactCommandLabel
+@onready var debug_toggle_button: Button = %DebugToggleButton
+@onready var debug_close_button: Button = %DebugCloseButton
+@onready var debug_drawer: PanelContainer = %DebugDrawer
+@onready var debug_content: VBoxContainer = %DebugContent
 
 var battle_state: BattleState = BattleState.READY
 var selected_scenario_id: StringName = &"survival"
@@ -98,11 +113,17 @@ var speed_effect_observed_ids: Dictionary = {}
 var demo_control_resistance_triggered := false
 var battle_elapsed := 0.0
 var attack_visual_spawn_count := 0
+var battlefield_display_root: Node2D = null
+var debug_panel_open := false
+var layout_viewport_size := Vector2.ZERO
+var position_mapping_scale := Vector2.ONE
+var uniform_visual_scale := 1.0
 
 
 func _ready() -> void:
 	command_controller.bind_runtime(self)
-	stage_label.text = "V2-4 集火与拆阵指挥"
+	stage_label.text = "V2-5A 战场全屏化与折叠调试面板"
+	setup_fullscreen_layout()
 	setup_scenario_options()
 	setup_deployment_slots()
 	setup_character_roster()
@@ -112,15 +133,231 @@ func _ready() -> void:
 	recommend_button.pressed.connect(apply_recommended_deployment)
 	clear_deployment_button.pressed.connect(clear_deployment)
 	undeploy_button.pressed.connect(undeploy_selected_character)
+	debug_close_button.pressed.connect(set_debug_panel_open.bind(false))
 	battlefield.gui_input.connect(on_battlefield_gui_input)
 	battlefield_content.resized.connect(on_battlefield_resized)
+	resized.connect(on_viewport_resized)
 	restart_battle()
+
+
+func setup_fullscreen_layout() -> void:
+	var original_content := battlefield.get_parent()
+	battlefield.reparent(self)
+	move_child(battlefield, $Background.get_index() + 1)
+	battlefield.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	battlefield.z_index = 0
+	battlefield.mouse_filter = Control.MOUSE_FILTER_STOP
+
+	battlefield_display_root = Node2D.new()
+	battlefield_display_root.name = "BattlefieldDisplayRoot"
+	battlefield.add_child(battlefield_display_root)
+	battlefield_content.reparent(battlefield_display_root)
+	battlefield_content.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	battlefield_content.position = Vector2.ZERO
+	battlefield_content.size = LOGICAL_BATTLEFIELD_SIZE
+
+	for child in original_content.get_children():
+		if child != battlefield:
+			child.reparent(debug_content)
+	root_margin.visible = false
+
+	scenario_option.custom_minimum_size.x = 150.0
+	start_button.custom_minimum_size.x = 100.0
+	restart_button.custom_minimum_size.x = 100.0
+	selected_character_label.custom_minimum_size.x = 120.0
+	recommend_button.custom_minimum_size.x = 88.0
+	clear_deployment_button.custom_minimum_size.x = 88.0
+	undeploy_button.custom_minimum_size.x = 88.0
+	set_debug_panel_open(false)
+	apply_fullscreen_layout(size)
+
+
+func on_viewport_resized() -> void:
+	apply_fullscreen_layout(size)
+
+
+func apply_fullscreen_layout(viewport_size: Vector2) -> void:
+	if not is_instance_valid(battlefield_display_root):
+		return
+	var safe_size := Vector2(
+		maxf(1.0, viewport_size.x),
+		maxf(1.0, viewport_size.y)
+	)
+	layout_viewport_size = safe_size
+	position_mapping_scale = Vector2(
+		safe_size.x / LOGICAL_BATTLEFIELD_SIZE.x,
+		safe_size.y / LOGICAL_BATTLEFIELD_SIZE.y
+	)
+	uniform_visual_scale = maxf(
+		0.01,
+		minf(safe_size.x / 1920.0, safe_size.y / 1080.0)
+	)
+	battlefield_display_root.position = Vector2.ZERO
+	battlefield_display_root.scale = position_mapping_scale
+	apply_visual_mapping()
+	var drawer_width := clampf(safe_size.x * 0.30, 440.0, 520.0)
+	debug_drawer.offset_left = -drawer_width
+	debug_content.custom_minimum_size.x = maxf(416.0, drawer_width - 36.0)
+	route_view.queue_redraw()
+	formation_manager.queue_redraw()
+
+
+func logic_to_screen_position(logic_position: Vector2) -> Vector2:
+	return logic_position * position_mapping_scale
+
+
+func screen_to_logic_position(screen_position: Vector2) -> Vector2:
+	return Vector2(
+		screen_position.x / maxf(position_mapping_scale.x, 0.0001),
+		screen_position.y / maxf(position_mapping_scale.y, 0.0001)
+	)
+
+
+func logic_to_visual_layer_position(logic_position: Vector2) -> Vector2:
+	return logic_to_screen_position(logic_position) / uniform_visual_scale
+
+
+func get_visual_compensation_scale() -> Vector2:
+	return Vector2(
+		uniform_visual_scale / maxf(position_mapping_scale.x, 0.0001),
+		uniform_visual_scale / maxf(position_mapping_scale.y, 0.0001)
+	)
+
+
+func apply_visual_mapping() -> void:
+	var compensation := get_visual_compensation_scale()
+	for visual_node in [
+		battlefield_caption,
+		village_entrance,
+		spawn_port_top,
+		spawn_port_middle,
+		spawn_port_bottom,
+	]:
+		apply_control_visual_compensation(visual_node, compensation)
+	for slot in deployment_slots.values():
+		apply_control_visual_compensation(slot, compensation)
+	for character in character_nodes.values():
+		character.scale = compensation
+	for enemy in active_enemies.values():
+		if is_instance_valid(enemy):
+			enemy.scale = compensation
+	projectile_visual_layer.scale = compensation
+	route_view.scale = compensation
+	route_view.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	route_view.position = Vector2.ZERO
+	route_view.size = layout_viewport_size / uniform_visual_scale
+	route_view.configure_display_mapping(
+		LOGICAL_BATTLEFIELD_SIZE,
+		position_mapping_scale / uniform_visual_scale,
+		uniform_visual_scale
+	)
+	formation_manager.scale = compensation
+	formation_manager.configure_display_mapping(
+		position_mapping_scale / uniform_visual_scale,
+		uniform_visual_scale
+	)
+
+
+func apply_control_visual_compensation(
+	control: Control,
+	compensation: Vector2
+) -> void:
+	control.pivot_offset = control.size * 0.5
+	control.scale = compensation
+
+
+func get_resolution_layout_preview(window_size: Vector2) -> Dictionary:
+	var safe_window := Vector2(maxf(1.0, window_size.x), maxf(1.0, window_size.y))
+	var design_size := Vector2(1920.0, 1080.0)
+	var window_scale := Vector2(
+		safe_window.x / design_size.x,
+		safe_window.y / design_size.y
+	)
+	var drawer_design_width := clampf(design_size.x * 0.30, 440.0, 520.0)
+	var design_position_scale := design_size / LOGICAL_BATTLEFIELD_SIZE
+	var window_visual_scale := minf(window_scale.x, window_scale.y)
+	return {
+		"window_size": safe_window,
+		"battlefield_screen_rect": Rect2(Vector2.ZERO, safe_window),
+		"drawer_screen_width": drawer_design_width * window_scale.x,
+		"drawer_screen_height": safe_window.y,
+		"logical_battlefield_size": LOGICAL_BATTLEFIELD_SIZE,
+		"design_to_window_scale": window_scale,
+		"position_mapping_scale": design_position_scale * window_scale,
+		"uniform_visual_scale": window_visual_scale,
+		"visual_aspect_ratio": 1.0,
+	}
+
+
+func get_layout_snapshot() -> Dictionary:
+	var enemy_positions: Dictionary = {}
+	for enemy_id in active_enemies.keys():
+		var enemy = active_enemies[enemy_id]
+		if is_instance_valid(enemy):
+			enemy_positions[enemy_id] = enemy.position
+	return {
+		"viewport_size": layout_viewport_size,
+		"battlefield_size": battlefield.size,
+		"logical_battlefield_size": battlefield_content.size,
+		"display_scale": battlefield_display_root.scale,
+		"position_mapping_scale": position_mapping_scale,
+		"uniform_visual_scale": uniform_visual_scale,
+		"visual_compensation_scale": get_visual_compensation_scale(),
+		"route_visual_global_scale": get_global_axis_scale(route_view),
+		"formation_visual_global_scale": get_global_axis_scale(formation_manager),
+		"projectile_visual_global_scale": get_global_axis_scale(projectile_visual_layer),
+		"caption_visual_global_scale": get_global_axis_scale(battlefield_caption),
+		"village_visual_global_scale": get_global_axis_scale(village_entrance),
+		"debug_panel_open": debug_panel_open,
+		"debug_drawer_width": -debug_drawer.offset_left,
+		"debug_drawer_mouse_filter": debug_drawer.mouse_filter,
+		"compact_hud_visible": %CompactHud.visible,
+		"enemy_positions": enemy_positions,
+	}
+
+
+func get_global_axis_scale(canvas_item: CanvasItem) -> Vector2:
+	var transform := canvas_item.get_global_transform_with_canvas()
+	return Vector2(transform.x.length(), transform.y.length())
+
+
+func set_debug_panel_open(open: bool) -> void:
+	debug_panel_open = open
+	debug_drawer.visible = open
+	debug_toggle_button.text = "收起调试" if open else "调试"
+
+
+func toggle_debug_panel() -> void:
+	set_debug_panel_open(not debug_panel_open)
+
+
+func handle_escape_action() -> StringName:
+	if debug_panel_open:
+		set_debug_panel_open(false)
+		return &"CLOSED_DEBUG_PANEL"
+	command_controller.cancel_command(&"PLAYER_CANCEL")
+	update_ui()
+	return &"CANCELED_COMMAND"
 
 
 func _process(delta: float) -> void:
 	update_hover_target()
 	if automatic_simulation:
 		simulate_step(delta)
+
+
+func _input(event: InputEvent) -> void:
+	if not event is InputEventMouseButton:
+		return
+	var mouse_event := event as InputEventMouseButton
+	if not mouse_event.pressed or mouse_event.button_index != MOUSE_BUTTON_LEFT:
+		return
+	if not debug_toggle_button.is_visible_in_tree():
+		return
+	if not debug_toggle_button.get_global_rect().has_point(mouse_event.position):
+		return
+	toggle_debug_panel()
+	get_viewport().set_input_as_handled()
 
 
 func _exit_tree() -> void:
@@ -131,8 +368,7 @@ func _exit_tree() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo \
 			and event.keycode == KEY_ESCAPE:
-		command_controller.cancel_command(&"PLAYER_CANCEL")
-		update_ui()
+		handle_escape_action()
 		get_viewport().set_input_as_handled()
 		return
 	if not event is InputEventMouseButton or not event.pressed:
@@ -146,13 +382,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func on_battlefield_gui_input(event: InputEvent) -> void:
 	if not event is InputEventMouseButton or not event.pressed:
 		return
-	var viewport_position: Vector2 = (
-		battlefield.get_global_transform_with_canvas() * event.position
-	)
-	var local_position: Vector2 = (
-		battlefield_content.get_global_transform_with_canvas().affine_inverse()
-		* viewport_position
-	)
+	var local_position := screen_to_logic_position(event.position)
 	if handle_battlefield_pointer(local_position, event.button_index):
 		battlefield.accept_event()
 
@@ -195,6 +425,10 @@ func setup_deployment_slots() -> void:
 		slot.configure(slot_data, PrototypeConfig.get_route_color(lane_id))
 		slot.pressed.connect(on_deployment_slot_pressed.bind(slot_id))
 		deployment_layer.add_child(slot)
+		apply_control_visual_compensation(
+			slot,
+			get_visual_compensation_scale()
+		)
 		deployment_slots[slot_id] = slot
 	update_deployment_positions()
 
@@ -206,13 +440,14 @@ func setup_character_roster() -> void:
 		character.configure(character_id, definition)
 		character.character_died.connect(handle_character_death)
 		character_layer.add_child(character)
+		character.scale = get_visual_compensation_scale()
 		character_nodes[character_id] = character
 
 		var card := Button.new()
 		card.name = "CharacterCard_%s" % String(character_id)
-		card.custom_minimum_size = Vector2(190.0, 44.0)
+		card.custom_minimum_size = Vector2(100.0, 44.0)
 		card.focus_mode = Control.FOCUS_NONE
-		card.add_theme_font_size_override("font_size", 15)
+		card.add_theme_font_size_override("font_size", 13)
 		card.pressed.connect(select_character.bind(character_id))
 		character_card_row.add_child(card)
 		character_cards[character_id] = card
@@ -404,6 +639,7 @@ func start_battle() -> bool:
 	command_controller.reset_for_restart()
 	battle_state = BattleState.RUNNING
 	spawn_next_enemy()
+	set_debug_panel_open(false)
 	update_ui()
 	return true
 
@@ -445,6 +681,7 @@ func restart_battle() -> void:
 		run_sequence
 	)
 	command_controller.reset_for_restart()
+	set_debug_panel_open(false)
 	update_ui()
 
 
@@ -637,6 +874,7 @@ func spawn_enemy_for_route(
 	enemy.attacked_blocker.connect(handle_enemy_attack)
 	enemy.damage_resolved.connect(handle_enemy_damage_resolved)
 	enemy_layer.add_child(enemy)
+	enemy.scale = get_visual_compensation_scale()
 	active_enemies[enemy_id] = enemy
 	generated_enemy_count += 1
 	generated_by_route[resolved_route_id] = int(
@@ -751,13 +989,15 @@ func spawn_attack_visual(action: Dictionary) -> Node2D:
 	elif role_id == &"mage":
 		visual_kind = PrototypeProjectileVisual.KIND_MAGIC
 	var visual = PrototypeProjectileVisual.new()
+	var logic_distance := visual_start.distance_to(target)
 	visual.configure(
 		StringName(action.get("source_id", &"")),
 		StringName(action.get("target_id", &"")),
 		int(action.get("attack_sequence_id", 0)),
 		visual_kind,
-		visual_start,
-		target
+		logic_to_visual_layer_position(visual_start),
+		logic_to_visual_layer_position(target),
+		logic_distance
 	)
 	projectile_visual_layer.add_child(visual)
 	attack_visual_spawn_count += 1
@@ -778,7 +1018,9 @@ func get_attack_visual_snapshots() -> Array[Dictionary]:
 		return snapshots
 	for visual in projectile_visual_layer.get_children():
 		if is_instance_valid(visual) and visual.has_method("get_debug_snapshot"):
-			snapshots.append(visual.get_debug_snapshot())
+			var snapshot: Dictionary = visual.get_debug_snapshot()
+			snapshot["global_axis_scale"] = get_global_axis_scale(visual)
+			snapshots.append(snapshot)
 	return snapshots
 
 
@@ -1092,7 +1334,7 @@ func update_hover_target() -> void:
 	if not battlefield_content.get_global_rect().has_point(mouse_position):
 		command_controller.set_hover_target(&"")
 		return
-	var local_position: Vector2 = battlefield_content.get_global_transform_with_canvas().affine_inverse() * mouse_position
+	var local_position := screen_to_logic_position(mouse_position)
 	var enemy = pick_enemy_at(local_position)
 	command_controller.set_hover_target(
 		StringName(enemy.runtime_id) if is_instance_valid(enemy) else &""
@@ -1288,6 +1530,9 @@ func update_ui() -> void:
 		PrototypeConfig.VILLAGE_MAX_DURABILITY,
 	]
 	state_label.text = "当前状态：%s" % get_state_name()
+	compact_durability_label.text = durability_label.text
+	compact_state_label.text = "状态：%s" % get_state_name()
+	compact_wave_label.text = "波次：V2-5 预留（未启用）"
 	generated_label.text = "已生成：%d/%d" % [generated_enemy_count, planned_count]
 	active_label.text = "场上活动：%d" % active_enemies.size()
 	killed_label.text = "已击杀：%d" % killed_enemy_count
@@ -1342,6 +1587,7 @@ func update_ui() -> void:
 			String(command.get("route_id", &"")),
 			waiting,
 		]
+	compact_command_label.text = command_status_label.text
 	start_button.disabled = battle_state != BattleState.READY
 	scenario_option.disabled = battle_state != BattleState.READY
 	refresh_deployment_visuals()

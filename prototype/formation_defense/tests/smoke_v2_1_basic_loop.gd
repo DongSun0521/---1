@@ -127,36 +127,36 @@ func run() -> void:
 
 func assert_required_nodes(controller: Node) -> void:
 	for node_path: String in [
-		"RootMargin/Content/Battlefield",
-		"RootMargin/Content/Battlefield/BattlefieldContent/RouteView",
-		"RootMargin/Content/Battlefield/BattlefieldContent/EnemyLayer",
-		"RootMargin/Content/Battlefield/BattlefieldContent/SpawnPortTop",
-		"RootMargin/Content/Battlefield/BattlefieldContent/SpawnPortMiddle",
-		"RootMargin/Content/Battlefield/BattlefieldContent/SpawnPortBottom",
-		"RootMargin/Content/Battlefield/BattlefieldContent/VillageEntrance",
-		"RootMargin/Content/ControlPanel/ControlRow/ScenarioOption",
-		"RootMargin/Content/ControlPanel/ControlRow/StartButton",
-		"RootMargin/Content/ControlPanel/ControlRow/RestartButton",
-		"RootMargin/Content/Notice/ResultLabel",
+		"Battlefield",
+		"Battlefield/BattlefieldDisplayRoot/BattlefieldContent/RouteView",
+		"Battlefield/BattlefieldDisplayRoot/BattlefieldContent/EnemyLayer",
+		"Battlefield/BattlefieldDisplayRoot/BattlefieldContent/SpawnPortTop",
+		"Battlefield/BattlefieldDisplayRoot/BattlefieldContent/SpawnPortMiddle",
+		"Battlefield/BattlefieldDisplayRoot/BattlefieldContent/SpawnPortBottom",
+		"Battlefield/BattlefieldDisplayRoot/BattlefieldContent/VillageEntrance",
+		"DebugDrawer/DrawerMargin/DrawerRows/DebugScroll/DebugContent/ControlPanel/ControlRow/ScenarioOption",
+		"DebugDrawer/DrawerMargin/DrawerRows/DebugScroll/DebugContent/ControlPanel/ControlRow/StartButton",
+		"DebugDrawer/DrawerMargin/DrawerRows/DebugScroll/DebugContent/ControlPanel/ControlRow/RestartButton",
+		"DebugDrawer/DrawerMargin/DrawerRows/DebugScroll/DebugContent/Notice/ResultLabel",
 	]:
 		require(
 			controller.get_node_or_null(node_path) != null,
 			"required V2-1 node is missing: %s" % node_path
 		)
 	var battlefield := controller.get_node(
-		"RootMargin/Content/Battlefield"
+		"Battlefield"
 	) as Control
 	var top_port := controller.get_node(
-		"RootMargin/Content/Battlefield/BattlefieldContent/SpawnPortTop"
+		"Battlefield/BattlefieldDisplayRoot/BattlefieldContent/SpawnPortTop"
 	) as Control
 	var middle_port := controller.get_node(
-		"RootMargin/Content/Battlefield/BattlefieldContent/SpawnPortMiddle"
+		"Battlefield/BattlefieldDisplayRoot/BattlefieldContent/SpawnPortMiddle"
 	) as Control
 	var bottom_port := controller.get_node(
-		"RootMargin/Content/Battlefield/BattlefieldContent/SpawnPortBottom"
+		"Battlefield/BattlefieldDisplayRoot/BattlefieldContent/SpawnPortBottom"
 	) as Control
 	var village := controller.get_node(
-		"RootMargin/Content/Battlefield/BattlefieldContent/VillageEntrance"
+		"Battlefield/BattlefieldDisplayRoot/BattlefieldContent/VillageEntrance"
 	) as Control
 	require(
 		battlefield.size.x > 1000.0 and battlefield.size.y > 400.0,
@@ -363,14 +363,14 @@ func assert_ready_reset(controller: Node, expected_finish_count: int) -> void:
 		"restart duplicated or erased completed-run accounting"
 	)
 	var enemy_layer := controller.get_node(
-		"RootMargin/Content/Battlefield/BattlefieldContent/EnemyLayer"
+		"Battlefield/BattlefieldDisplayRoot/BattlefieldContent/EnemyLayer"
 	)
 	require(
 		enemy_layer.get_child_count() == 0,
 		"restart left enemy nodes in the scene tree"
 	)
 	var result_label := controller.get_node(
-		"RootMargin/Content/Notice/ResultLabel"
+		"DebugDrawer/DrawerMargin/DrawerRows/DebugScroll/DebugContent/Notice/ResultLabel"
 	) as Label
 	require(
 		result_label != null and result_label.text.contains("准备就绪"),

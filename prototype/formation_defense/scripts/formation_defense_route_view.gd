@@ -6,6 +6,9 @@ const PrototypeConfig := preload(
 const TRACK_WIDTH := 9.0
 const DOT_SPACING := 44.0
 var active_spawn_point_ids: Array[StringName] = []
+var logical_battlefield_size := Vector2(1802.0, 414.0)
+var logic_to_visual_scale := Vector2.ONE
+var visual_scale := 1.0
 
 
 func _ready() -> void:
@@ -17,7 +20,11 @@ func _ready() -> void:
 func _draw() -> void:
 	draw_formation_zones()
 	for route_id: StringName in get_visible_route_ids():
-		var points := PrototypeConfig.get_route_points(route_id, size)
+		var logical_points := PrototypeConfig.get_route_points(
+			route_id,
+			logical_battlefield_size
+		)
+		var points := map_points(logical_points)
 		if points.size() < 2:
 			continue
 		var route_color := PrototypeConfig.get_route_color(route_id)
@@ -25,7 +32,9 @@ func _draw() -> void:
 		draw_polyline(points, Color(route_color, 0.52), 2.0, true)
 		draw_route_dots(points, Color(route_color, 0.82))
 	draw_spawn_points()
-	var entrance := PrototypeConfig.get_village_entrance_point(size)
+	var entrance := map_position(PrototypeConfig.get_village_entrance_point(
+		logical_battlefield_size
+	))
 	draw_circle(entrance, 21.0, Color(0.35, 0.92, 0.58, 0.16))
 	draw_arc(
 		entrance,
@@ -39,14 +48,52 @@ func _draw() -> void:
 	)
 
 
+func configure_display_mapping(
+	new_logical_size: Vector2,
+	new_logic_to_visual_scale: Vector2,
+	new_visual_scale: float
+) -> void:
+	logical_battlefield_size = new_logical_size
+	logic_to_visual_scale = new_logic_to_visual_scale
+	visual_scale = maxf(0.01, new_visual_scale)
+	queue_redraw()
+
+
+func map_position(logic_position: Vector2) -> Vector2:
+	return logic_position * logic_to_visual_scale
+
+
+func map_points(logic_points: PackedVector2Array) -> PackedVector2Array:
+	var result := PackedVector2Array()
+	for point: Vector2 in logic_points:
+		result.append(map_position(point))
+	return result
+
+
+func get_visual_debug_snapshot() -> Dictionary:
+	return {
+		"logic_to_visual_scale": logic_to_visual_scale,
+		"visual_scale": visual_scale,
+		"track_width": TRACK_WIDTH,
+		"dot_radius": 3.5,
+		"entrance_radius": 21.0,
+	}
+
+
 func set_active_spawn_point_ids(new_ids: Array[StringName]) -> void:
 	active_spawn_point_ids = new_ids.duplicate()
 	queue_redraw()
 
 
 func draw_formation_zones() -> void:
-	for zone: Dictionary in PrototypeConfig.get_formation_zones(size):
-		var rect: Rect2 = zone.get("rect", Rect2())
+	for zone: Dictionary in PrototypeConfig.get_formation_zones(
+		logical_battlefield_size
+	):
+		var logic_rect: Rect2 = zone.get("rect", Rect2())
+		var rect := Rect2(
+			map_position(logic_rect.position),
+			logic_rect.size * logic_to_visual_scale
+		)
 		var color: Color = zone.get("color", Color(1.0, 1.0, 1.0, 0.08))
 		draw_rect(rect, color, true)
 		draw_rect(rect, Color(color, minf(0.48, color.a + 0.28)), false, 1.5)
@@ -70,8 +117,9 @@ func draw_spawn_points() -> void:
 		)
 		var point := PrototypeConfig.get_spawn_point_position(
 			spawn_point_id,
-			size
+			logical_battlefield_size
 		)
+		point = map_position(point)
 		var active := active_spawn_point_ids.has(spawn_point_id)
 		if not active:
 			continue

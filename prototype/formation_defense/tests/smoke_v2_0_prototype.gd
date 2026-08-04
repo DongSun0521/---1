@@ -24,14 +24,14 @@ const DEFAULT_SAVE_PATH := "user://adventure_village_save.json"
 const FORMAL_MAIN_SCENE_PATH := "res://features/main/main.tscn"
 
 const EXPECTED_NODE_PATHS: Array[String] = [
-	"RootMargin/Content/Title",
-	"RootMargin/Content/StageLabel",
-	"RootMargin/Content/Battlefield",
-	"RootMargin/Content/Battlefield/BattlefieldContent/SpawnPortTop",
-	"RootMargin/Content/Battlefield/BattlefieldContent/SpawnPortMiddle",
-	"RootMargin/Content/Battlefield/BattlefieldContent/SpawnPortBottom",
-	"RootMargin/Content/Battlefield/BattlefieldContent/VillageEntrance",
-	"RootMargin/Content/Notice",
+	"DebugDrawer/DrawerMargin/DrawerRows/DebugScroll/DebugContent/Title",
+	"DebugDrawer/DrawerMargin/DrawerRows/DebugScroll/DebugContent/StageLabel",
+	"Battlefield",
+	"Battlefield/BattlefieldDisplayRoot/BattlefieldContent/SpawnPortTop",
+	"Battlefield/BattlefieldDisplayRoot/BattlefieldContent/SpawnPortMiddle",
+	"Battlefield/BattlefieldDisplayRoot/BattlefieldContent/SpawnPortBottom",
+	"Battlefield/BattlefieldDisplayRoot/BattlefieldContent/VillageEntrance",
+	"DebugDrawer/DrawerMargin/DrawerRows/DebugScroll/DebugContent/Notice",
 ]
 
 const FORBIDDEN_RUNTIME_TOKENS: Array[String] = [
@@ -159,12 +159,12 @@ func assert_placeholder_nodes(prototype: Node) -> void:
 			"prototype placeholder node is missing: %s" % node_path
 		)
 
-	var title := prototype.get_node_or_null("RootMargin/Content/Title") as Label
+	var title := prototype.get_node_or_null("DebugDrawer/DrawerMargin/DrawerRows/DebugScroll/DebugContent/Title") as Label
 	var stage_label := prototype.get_node_or_null(
-		"RootMargin/Content/StageLabel"
+		"DebugDrawer/DrawerMargin/DrawerRows/DebugScroll/DebugContent/StageLabel"
 	) as Label
 	var notice := prototype.get_node_or_null(
-		"RootMargin/Content/Notice/ResultLabel"
+		"DebugDrawer/DrawerMargin/DrawerRows/DebugScroll/DebugContent/Notice/ResultLabel"
 	) as Label
 	require(
 		title != null and title.text == "Combat V2 阵型塔防原型",

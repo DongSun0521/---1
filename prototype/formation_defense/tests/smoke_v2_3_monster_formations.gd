@@ -149,10 +149,10 @@ func run() -> void:
 
 func assert_required_nodes(controller: Node) -> void:
 	for node_path: String in [
-		"RootMargin/Content/Battlefield/BattlefieldContent/FormationLayer",
-		"RootMargin/Content/Battlefield/BattlefieldContent/EnemyLayer",
-		"RootMargin/Content/FormationStatusPanel/FormationStatsLabel",
-		"RootMargin/Content/ControlPanel/ControlRow/ScenarioOption",
+		"Battlefield/BattlefieldDisplayRoot/BattlefieldContent/FormationLayer",
+		"Battlefield/BattlefieldDisplayRoot/BattlefieldContent/EnemyLayer",
+		"DebugDrawer/DrawerMargin/DrawerRows/DebugScroll/DebugContent/FormationStatusPanel/FormationStatsLabel",
+		"DebugDrawer/DrawerMargin/DrawerRows/DebugScroll/DebugContent/ControlPanel/ControlRow/ScenarioOption",
 	]:
 		require(
 			controller.get_node_or_null(node_path) != null,
@@ -1751,7 +1751,7 @@ func assert_clean_ready_state(controller: Node) -> void:
 			"restart retained character health or blocking state"
 		)
 	var formation_layer := controller.get_node(
-		"RootMargin/Content/Battlefield/BattlefieldContent/FormationLayer"
+		"Battlefield/BattlefieldDisplayRoot/BattlefieldContent/FormationLayer"
 	)
 	require(
 		formation_layer.get_child_count() == 0,

@@ -149,16 +149,16 @@ func run() -> void:
 
 func assert_required_nodes(controller: Node) -> void:
 	for node_path: String in [
-		"RootMargin/Content/Battlefield/BattlefieldContent/DeploymentLayer",
-		"RootMargin/Content/Battlefield/BattlefieldContent/CharacterLayer",
-		"RootMargin/Content/Battlefield/BattlefieldContent/EnemyLayer",
-		"RootMargin/Content/DeploymentPanel/DeploymentContent/CharacterCardRow",
-		"RootMargin/Content/DeploymentPanel/DeploymentContent/DeploymentHeader/RecommendButton",
-		"RootMargin/Content/DeploymentPanel/DeploymentContent/DeploymentHeader/ClearDeploymentButton",
-		"RootMargin/Content/DeploymentPanel/DeploymentContent/DeploymentHeader/UndeployButton",
-		"RootMargin/Content/StatusPanel/StatusRow/KilledLabel",
-		"RootMargin/Content/StatusPanel/StatusRow/LeakedLabel",
-		"RootMargin/Content/StatusPanel/StatusRow/ResolvedLabel",
+		"Battlefield/BattlefieldDisplayRoot/BattlefieldContent/DeploymentLayer",
+		"Battlefield/BattlefieldDisplayRoot/BattlefieldContent/CharacterLayer",
+		"Battlefield/BattlefieldDisplayRoot/BattlefieldContent/EnemyLayer",
+		"DebugDrawer/DrawerMargin/DrawerRows/DebugScroll/DebugContent/DeploymentPanel/DeploymentContent/CharacterCardRow",
+		"DebugDrawer/DrawerMargin/DrawerRows/DebugScroll/DebugContent/DeploymentPanel/DeploymentContent/DeploymentHeader/RecommendButton",
+		"DebugDrawer/DrawerMargin/DrawerRows/DebugScroll/DebugContent/DeploymentPanel/DeploymentContent/DeploymentHeader/ClearDeploymentButton",
+		"DebugDrawer/DrawerMargin/DrawerRows/DebugScroll/DebugContent/DeploymentPanel/DeploymentContent/DeploymentHeader/UndeployButton",
+		"DebugDrawer/DrawerMargin/DrawerRows/DebugScroll/DebugContent/StatusPanel/StatusRow/KilledLabel",
+		"DebugDrawer/DrawerMargin/DrawerRows/DebugScroll/DebugContent/StatusPanel/StatusRow/LeakedLabel",
+		"DebugDrawer/DrawerMargin/DrawerRows/DebugScroll/DebugContent/StatusPanel/StatusRow/ResolvedLabel",
 	]:
 		require(
 			controller.get_node_or_null(node_path) != null,
@@ -694,7 +694,7 @@ func assert_clean_ready_state(controller: Node) -> void:
 			"restart retained character combat state"
 		)
 	var enemy_layer := controller.get_node(
-		"RootMargin/Content/Battlefield/BattlefieldContent/EnemyLayer"
+		"Battlefield/BattlefieldDisplayRoot/BattlefieldContent/EnemyLayer"
 	)
 	require(
 		enemy_layer.get_child_count() == 0,

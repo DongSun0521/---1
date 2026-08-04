@@ -21,7 +21,8 @@ func configure(
 	new_attack_sequence_id: int,
 	new_visual_kind: StringName,
 	new_start_position: Vector2,
-	new_end_position: Vector2
+	new_end_position: Vector2,
+	logic_travel_distance := -1.0
 ) -> void:
 	attacker_runtime_id = new_attacker_runtime_id
 	target_runtime_id = new_target_runtime_id
@@ -35,7 +36,12 @@ func configure(
 		duration = 0.10
 		position = Vector2.ZERO
 	else:
-		duration = clampf(start_position.distance_to(end_position) / 900.0, 0.15, 0.35)
+		var travel_distance := (
+			logic_travel_distance
+			if logic_travel_distance >= 0.0
+			else start_position.distance_to(end_position)
+		)
+		duration = clampf(travel_distance / 900.0, 0.15, 0.35)
 		position = start_position
 		rotation = (end_position - start_position).angle()
 	set_process(true)
