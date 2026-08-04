@@ -547,12 +547,114 @@ const FORMATION_DEMO_DEPLOYMENT := {
 	&"doctor": &"middle_c2",
 }
 
+const WAVE_BATTLES := {
+	&"v2_5b_validation": {
+		"battle_id": &"v2_5b_validation",
+		"display_name": "V2-5B 波次验证",
+		"random_seed": 2505,
+		"initial_countdown": 1.5,
+		"inter_wave_delay": 1.2,
+		"waves": [
+			{
+				"wave_id": &"wave_1",
+				"display_name": "第一波：基础生成",
+				"subwaves": [{
+					"start_offset": 0.0,
+					"spawn_groups": [{
+						"enemy_profile_id": &"charge",
+						"max_health": 100,
+						"count": 2,
+						"spawn_interval": 0.7,
+						"allowed_spawn_points": [&"spawn_center"],
+						"allowed_lanes": [&"formation_center"],
+						"selection_mode": &"round_robin",
+					}],
+				}],
+			},
+			{
+				"wave_id": &"wave_2",
+				"display_name": "第二波：错时子波次",
+				"subwaves": [
+					{
+						"start_offset": 0.0,
+						"spawn_groups": [{
+							"enemy_profile_id": &"charge",
+							"max_health": 100,
+							"count": 2,
+							"spawn_interval": 0.8,
+							"allowed_spawn_points": [
+								&"spawn_upper", &"spawn_lower",
+							],
+							"allowed_lanes": [
+								&"formation_upper", &"formation_lower",
+							],
+							"selection_mode": &"round_robin",
+						}],
+					},
+					{
+						"start_offset": 1.1,
+						"spawn_groups": [{
+							"enemy_profile_id": &"shield",
+							"max_health": 120,
+							"count": 2,
+							"spawn_interval": 0.6,
+							"allowed_spawn_points": [
+								&"spawn_center", &"spawn_lower_outer",
+							],
+							"allowed_lanes": [
+								&"formation_center", &"formation_lower_outer",
+							],
+							"selection_mode": &"round_robin",
+						}],
+					},
+				],
+			},
+			{
+				"wave_id": &"wave_3",
+				"display_name": "第三波：重叠生成组",
+				"subwaves": [{
+					"start_offset": 0.0,
+					"spawn_groups": [
+						{
+							"enemy_profile_id": &"charge",
+							"max_health": 100,
+							"count": 3,
+							"spawn_interval": 0.7,
+							"allowed_spawn_points": [
+								&"spawn_upper_outer", &"spawn_center",
+							],
+							"allowed_lanes": [
+								&"formation_upper_outer", &"formation_center",
+							],
+							"selection_mode": &"random",
+						},
+						{
+							"enemy_profile_id": &"shield",
+							"max_health": 120,
+							"count": 3,
+							"spawn_interval": 0.7,
+							"allowed_spawn_points": [
+								&"spawn_lower", &"spawn_lower_outer",
+							],
+							"allowed_lanes": [
+								&"formation_lower", &"formation_lower_outer",
+							],
+							"selection_mode": &"random",
+						},
+					],
+				}],
+			},
+		],
+	},
+}
+
 const SCENARIO_IDS: Array[StringName] = [
 	&"survival",
 	&"defeat",
 	&"auto_battle",
 	&"formation_demo",
 	&"command_demo",
+	&"wave_validation",
 ]
 const SCENARIOS := {
 	&"survival": {
@@ -715,6 +817,19 @@ const SCENARIOS := {
 		"formations_enabled": true,
 		"auto_demo_control_resistance": true,
 		"inherit_spawn_plan": &"formation_demo",
+		"active_spawn_point_ids": [
+			&"spawn_upper_outer",
+			&"spawn_upper",
+			&"spawn_center",
+			&"spawn_lower",
+			&"spawn_lower_outer",
+		],
+	},
+	&"wave_validation": {
+		"display_name": "V2-5B 波次验证",
+		"description": "三波配置化子波次、重叠生成和固定种子验证。",
+		"formations_enabled": true,
+		"wave_battle_id": &"v2_5b_validation",
 		"active_spawn_point_ids": [
 			&"spawn_upper_outer",
 			&"spawn_upper",
@@ -1089,7 +1204,7 @@ static func get_character_definition(character_id: StringName) -> Dictionary:
 static func get_recommended_deployment(
 	scenario_id: StringName = &""
 ) -> Dictionary:
-	if scenario_id == &"formation_demo" or scenario_id == &"command_demo":
+	if scenario_id in [&"formation_demo", &"command_demo", &"wave_validation"]:
 		return FORMATION_DEMO_DEPLOYMENT.duplicate(true)
 	return RECOMMENDED_DEPLOYMENT.duplicate(true)
 
@@ -1100,6 +1215,19 @@ static func get_scenario_ids() -> Array[StringName]:
 
 static func get_scenario(scenario_id: StringName) -> Dictionary:
 	return SCENARIOS.get(scenario_id, SCENARIOS[&"survival"]).duplicate(true)
+
+
+static func get_wave_battle_config(battle_id: StringName) -> Dictionary:
+	return WAVE_BATTLES.get(battle_id, {}).duplicate(true)
+
+
+static func get_spawn_point_lane_map() -> Dictionary:
+	var result: Dictionary = {}
+	for spawn_point: Dictionary in SPAWN_POINTS:
+		result[StringName(spawn_point.get("spawn_point_id", &""))] = StringName(
+			spawn_point.get("route_id", &"")
+		)
+	return result
 
 
 static func get_scenario_spawn_entries(scenario_id: StringName) -> Array[Dictionary]:

@@ -279,6 +279,19 @@ text = "单体 0｜FORMING_A 0｜A阵 0｜FORMING_B 0｜B阵 0｜A完成 0｜B�
 horizontal_alignment = 1
 vertical_alignment = 1
 
+[node name="WaveDebugPanel" type="PanelContainer" parent="RootMargin/Content"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBox_control")
+
+[node name="WaveDebugLabel" type="Label" parent="RootMargin/Content/WaveDebugPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 0.88, 1, 1)
+theme_override_font_sizes/font_size = 14
+text = "波次调度：旧测试方案（未启用）"
+horizontal_alignment = 1
+vertical_alignment = 1
+
 [node name="DeploymentPanel" type="PanelContainer" parent="RootMargin/Content" unique_id=2070637127]
 layout_mode = 2
 

@@ -17,6 +17,9 @@ const PrototypeDeploymentSlot := preload(
 const PrototypeProjectileVisual := preload(
 	"res://prototype/formation_defense/scripts/formation_defense_projectile_visual.gd"
 )
+const PrototypeWaveDirector := preload(
+	"res://prototype/formation_defense/scripts/formation_defense_wave_director.gd"
+)
 
 enum BattleState {
 	READY,
@@ -57,6 +60,7 @@ const LOGICAL_BATTLEFIELD_SIZE := Vector2(1802.0, 414.0)
 @onready var resolved_label: Label = %ResolvedLabel
 @onready var scenario_label: Label = %ScenarioLabel
 @onready var formation_stats_label: Label = %FormationStatsLabel
+@onready var wave_debug_label: Label = %WaveDebugLabel
 @onready var command_status_label: Label = %CommandStatusLabel
 @onready var scenario_option: OptionButton = %ScenarioOption
 @onready var start_button: Button = %StartButton
@@ -118,10 +122,15 @@ var debug_panel_open := false
 var layout_viewport_size := Vector2.ZERO
 var position_mapping_scale := Vector2.ONE
 var uniform_visual_scale := 1.0
+var wave_director: Node = null
 
 
 func _ready() -> void:
 	command_controller.bind_runtime(self)
+	wave_director = PrototypeWaveDirector.new()
+	wave_director.name = "WaveDirector"
+	add_child(wave_director)
+	wave_director.spawn_requested.connect(handle_wave_spawn_requested)
 	stage_label.text = "V2-5A 战场全屏化与折叠调试面板"
 	setup_fullscreen_layout()
 	setup_scenario_options()
@@ -479,6 +488,35 @@ func select_scenario(scenario_id: StringName) -> bool:
 	return true
 
 
+func is_wave_scenario_enabled() -> bool:
+	var scenario := PrototypeConfig.get_scenario(selected_scenario_id)
+	return StringName(scenario.get("wave_battle_id", &"")) != &""
+
+
+func configure_wave_director() -> bool:
+	if not is_instance_valid(wave_director):
+		return false
+	if not is_wave_scenario_enabled():
+		wave_director.clear_configuration()
+		return true
+	var scenario := PrototypeConfig.get_scenario(selected_scenario_id)
+	var battle_id := StringName(scenario.get("wave_battle_id", &""))
+	var configured: bool = wave_director.configure(
+		PrototypeConfig.get_wave_battle_config(battle_id),
+		PrototypeConfig.get_monster_type_ids(),
+		PrototypeConfig.get_spawn_point_lane_map(),
+		PrototypeConfig.get_visual_route_ids()
+	)
+	if not configured:
+		push_error(
+			"Invalid Combat V2 wave config %s: %s" % [
+				String(battle_id),
+				"; ".join(wave_director.validation_errors),
+			]
+		)
+	return configured
+
+
 func find_scenario_option(scenario_id: StringName) -> int:
 	for option_index in range(scenario_option.item_count):
 		if StringName(scenario_option.get_item_metadata(option_index)) == scenario_id:
@@ -638,7 +676,13 @@ func start_battle() -> bool:
 	)
 	command_controller.reset_for_restart()
 	battle_state = BattleState.RUNNING
-	spawn_next_enemy()
+	if is_wave_scenario_enabled():
+		if not wave_director.start():
+			battle_state = BattleState.READY
+			update_ui()
+			return false
+	else:
+		spawn_next_enemy()
 	set_debug_panel_open(false)
 	update_ui()
 	return true
@@ -681,6 +725,9 @@ func restart_battle() -> void:
 		run_sequence
 	)
 	command_controller.reset_for_restart()
+	if is_wave_scenario_enabled():
+		battle_state = BattleState.RUNNING
+		wave_director.start()
 	set_debug_panel_open(false)
 	update_ui()
 
@@ -695,7 +742,10 @@ func simulate_step(delta: float) -> void:
 		return
 	var safe_delta := maxf(0.0, delta)
 	battle_elapsed += safe_delta
-	process_spawning(safe_delta)
+	if is_wave_scenario_enabled():
+		wave_director.advance(safe_delta)
+	else:
+		process_spawning(safe_delta)
 	update_enemy_blocking()
 	var enemies_this_step: Array = active_enemies.values()
 	var progress_before_move: Dictionary = {}
@@ -777,6 +827,25 @@ func spawn_next_enemy() -> void:
 		entry
 	)
 	spawn_index += 1
+
+
+func handle_wave_spawn_requested(spawn_event: Dictionary) -> void:
+	if battle_state != BattleState.RUNNING or not is_wave_scenario_enabled():
+		return
+	var spawn_overrides := {
+		"spawn_point_id": StringName(spawn_event.get("spawn_point_id", &"")),
+	}
+	var configured_max_health := int(spawn_event.get("max_health", 0))
+	if configured_max_health > 0:
+		spawn_overrides["max_health"] = configured_max_health
+	var enemy = spawn_enemy_for_route(
+		StringName(spawn_event.get("route_id", &"")),
+		StringName(spawn_event.get("enemy_profile_id", &"charge")),
+		spawn_overrides
+	)
+	if is_instance_valid(enemy):
+		wave_director.register_spawned_enemy(enemy.runtime_id, spawn_event)
+		spawn_index = generated_enemy_count
 
 
 func spawn_enemy_for_route(
@@ -1096,6 +1165,8 @@ func handle_enemy_death(enemy_id: StringName) -> void:
 	enemy.mark_death_settled()
 	killed_enemy_count += 1
 	resolved_enemy_count = killed_enemy_count + leaked_enemy_count
+	if is_wave_scenario_enabled():
+		wave_director.notify_enemy_resolved(enemy_id, &"KILLED")
 	remove_enemy(enemy_id)
 	evaluate_victory()
 	update_ui()
@@ -1125,6 +1196,8 @@ func handle_enemy_arrival(
 	settled_enemy_ids[enemy_id] = &"leaked"
 	leaked_enemy_count += 1
 	resolved_enemy_count = killed_enemy_count + leaked_enemy_count
+	if is_wave_scenario_enabled():
+		wave_director.notify_enemy_resolved(enemy_id, &"LEAKED")
 	village_durability = maxi(0, village_durability - maxi(0, leak_damage))
 	remove_enemy(enemy_id)
 	if village_durability <= 0:
@@ -1168,6 +1241,17 @@ func reset_character_combat_states() -> void:
 func evaluate_victory() -> void:
 	if battle_state != BattleState.RUNNING:
 		return
+	if is_wave_scenario_enabled():
+		var wave_snapshot: Dictionary = wave_director.get_snapshot()
+		if (
+			String(wave_snapshot.get("state", "")) == "COMPLETED"
+			and active_enemies.is_empty()
+			and village_durability > 0
+			and int(wave_snapshot.get("total_resolved", 0))
+				== int(wave_snapshot.get("total_planned", -1))
+		):
+			finish_victory()
+		return
 	var all_enemies_generated := spawn_index >= spawn_plan.size()
 	if (
 		all_enemies_generated
@@ -1193,6 +1277,8 @@ func finish_defeat() -> void:
 	if battle_state != BattleState.RUNNING:
 		return
 	battle_state = BattleState.DEFEAT
+	if is_instance_valid(wave_director):
+		wave_director.stop()
 	command_controller.handle_battle_end(&"BATTLE_END")
 	village_durability = 0
 	battle_finish_count += 1
@@ -1390,12 +1476,18 @@ func get_selected_route_sequence() -> Array[StringName]:
 
 
 func rebuild_spawn_plan() -> void:
+	if is_wave_scenario_enabled():
+		spawn_entries.clear()
+		spawn_plan.clear()
+		configure_wave_director()
+		return
 	spawn_entries = PrototypeConfig.get_scenario_spawn_entries(
 		selected_scenario_id
 	)
 	spawn_plan.clear()
 	for entry: Dictionary in spawn_entries:
 		spawn_plan.append(StringName(entry.get("route_id", &"top")))
+	configure_wave_director()
 
 
 func is_formation_scenario_enabled() -> bool:
@@ -1442,13 +1534,25 @@ func get_state_name() -> String:
 	return String(STATE_NAMES.get(battle_state, "UNKNOWN"))
 
 
+func get_planned_enemy_count() -> int:
+	if is_wave_scenario_enabled() and is_instance_valid(wave_director):
+		return int(wave_director.get_snapshot().get("total_planned", 0))
+	return spawn_plan.size()
+
+
+func get_wave_snapshot() -> Dictionary:
+	if not is_wave_scenario_enabled() or not is_instance_valid(wave_director):
+		return {}
+	return wave_director.get_snapshot()
+
+
 func get_battle_snapshot() -> Dictionary:
 	return {
 		"state": get_state_name(),
 		"scenario_id": selected_scenario_id,
 		"village_durability": village_durability,
 		"max_durability": PrototypeConfig.VILLAGE_MAX_DURABILITY,
-		"planned_enemy_count": spawn_plan.size(),
+		"planned_enemy_count": get_planned_enemy_count(),
 		"generated_enemy_count": generated_enemy_count,
 		"active_enemy_count": active_enemies.size(),
 		"killed_enemy_count": killed_enemy_count,
@@ -1482,6 +1586,7 @@ func get_battle_snapshot() -> Dictionary:
 		"attack_visuals": get_attack_visual_snapshots(),
 		"deployment": deployment_by_character.duplicate(true),
 		"characters": get_character_snapshots(),
+		"wave": get_wave_snapshot(),
 	}
 
 
@@ -1524,7 +1629,7 @@ func update_ui() -> void:
 		return
 	var scenario := PrototypeConfig.get_scenario(selected_scenario_id)
 	var scenario_name := String(scenario.get("display_name", selected_scenario_id))
-	var planned_count := spawn_plan.size()
+	var planned_count := get_planned_enemy_count()
 	durability_label.text = "村庄耐久：%d/%d" % [
 		village_durability,
 		PrototypeConfig.VILLAGE_MAX_DURABILITY,
@@ -1532,7 +1637,34 @@ func update_ui() -> void:
 	state_label.text = "当前状态：%s" % get_state_name()
 	compact_durability_label.text = durability_label.text
 	compact_state_label.text = "状态：%s" % get_state_name()
-	compact_wave_label.text = "波次：V2-5 预留（未启用）"
+	if is_wave_scenario_enabled():
+		var wave_snapshot: Dictionary = wave_director.get_snapshot()
+		compact_wave_label.text = wave_director.get_hud_text()
+		wave_debug_label.text = (
+			"波次 %d/%d｜状态 %s｜子波次 %d/%d｜下一事件 %.1f秒"
+			+ "\n本波 计划%d / 已生成%d / 活动%d / 击杀%d / 漏怪%d"
+			+ "｜全场 计划%d / 已生成%d / 已结算%d / 击杀%d / 漏怪%d"
+		) % [
+			int(wave_snapshot.get("display_wave_number", 0)),
+			int(wave_snapshot.get("total_waves", 0)),
+			String(wave_snapshot.get("state", "IDLE")),
+			int(wave_snapshot.get("triggered_subwave_count", 0)),
+			int(wave_snapshot.get("total_subwaves_current", 0)),
+			float(wave_snapshot.get("next_event_time", -1.0)),
+			int(wave_snapshot.get("current_wave_planned", 0)),
+			int(wave_snapshot.get("current_wave_generated", 0)),
+			int(wave_snapshot.get("current_wave_active", 0)),
+			int(wave_snapshot.get("current_wave_killed", 0)),
+			int(wave_snapshot.get("current_wave_leaked", 0)),
+			int(wave_snapshot.get("total_planned", 0)),
+			int(wave_snapshot.get("total_generated", 0)),
+			int(wave_snapshot.get("total_resolved", 0)),
+			int(wave_snapshot.get("total_killed", 0)),
+			int(wave_snapshot.get("total_leaked", 0)),
+		]
+	else:
+		compact_wave_label.text = "波次：V2-5旧测试方案"
+		wave_debug_label.text = "波次调度：旧测试方案（未启用）"
 	generated_label.text = "已生成：%d/%d" % [generated_enemy_count, planned_count]
 	active_label.text = "场上活动：%d" % active_enemies.size()
 	killed_label.text = "已击杀：%d" % killed_enemy_count

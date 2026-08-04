@@ -1,5 +1,41 @@
 # 原型数据目录
 
+## V2-5B 波次配置格式
+
+`formation_defense_config.gd` 的 `WAVE_BATTLES` 保存原型波次。顶层字段为 `battle_id`、
+`display_name`、`random_seed`、`initial_countdown`、`inter_wave_delay` 和 `waves`。每个 wave
+包含唯一 `wave_id`、显示名及 `subwaves`；子波次的 `start_offset` 相对本波开始时间，内部
+`spawn_groups` 支持：
+
+- `enemy_profile_id`：现有 `charge` 或 `shield`；
+- `max_health`：可选的本生成组生命值覆盖；省略时使用敌人配置的默认生命值；
+- `count`、`spawn_interval`：数量与同组出生间隔；
+- `allowed_spawn_points`、`allowed_lanes`：现有刷怪口和路线ID；两者为空时使用全部已知刷怪口；
+- `selection_mode`：`random` 使用固定种子随机，`round_robin` 按稳定顺序轮换。
+
+简化示例：
+
+```gdscript
+{
+    "wave_id": &"wave_1",
+    "subwaves": [{
+        "start_offset": 0.0,
+        "spawn_groups": [{
+            "enemy_profile_id": &"charge",
+            "max_health": 100,
+            "count": 2,
+            "spawn_interval": 0.7,
+            "allowed_spawn_points": [&"spawn_center"],
+            "allowed_lanes": [&"formation_center"],
+            "selection_mode": &"round_robin",
+        }],
+    }],
+}
+```
+
+调度器会拒绝重复 wave ID、空波次、非正数量或生命值、负延迟/间隔、未知敌人/刷怪口/路线及无法匹配
+任何出生候选的配置。V2-5B 配置仅用于结构验证，不是正式波次或平衡数据。
+
 ## V2-4 指挥相关约定
 
 V2-4 不增加伤害、易伤、资源或正式波次数值。`command_demo` 仅继承 V2-3 已验收的
