@@ -1,5 +1,18 @@
 # 原型数据目录
 
+## V2-5C节奏方案
+
+`v2_5c_pacing`使用与V2-5B相同的battle/wave/subwave/spawn_group结构。六波计划数为
+`4、5、6、7、9、13`，初始倒计时3秒、统一波间倒计时4秒。顶层
+`enemy_profile_overrides`只为本battle覆盖现有同类敌人的`max_health`和`move_speed`；
+`formation_approach_speed`、`formation_completion_tolerance`和`formation_duration_multiplier`
+只控制该方案的真实靠拢过程。旧battle省略这些字段时继续使用原有默认值。
+
+节奏运行态由WaveDirector的`pacing`快照提供，包括每波记录、5秒压力采样、全场峰值、最长
+非倒计时空场和最终耐久；这些数据仅用于原型调试与专项验收，不是正式关卡平衡数据。
+其中`completed_a`和`completed_b`是本波首次完成的历史事件增量，不是当前活动阵型数量；
+全局累计同样只增不减，A阵转入B阵、中断、降级或消灭都不会撤销已经发生的完成事件。
+
 ## V2-5B 波次配置格式
 
 `formation_defense_config.gd` 的 `WAVE_BATTLES` 保存原型波次。顶层字段为 `battle_id`、

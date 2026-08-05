@@ -16,6 +16,9 @@ var runtime_elapsed := 0.0
 var last_active_enemies: Dictionary = {}
 var a_pair_neighbor_route_span := PrototypeConfig.A_PAIR_NEIGHBOR_ROUTE_SPAN
 var b_pair_neighbor_route_span := PrototypeConfig.B_PAIR_NEIGHBOR_ROUTE_SPAN
+var formation_approach_speed := PrototypeConfig.FORMATION_SLOT_MOVE_SPEED
+var formation_completion_tolerance := PrototypeConfig.FORMATION_SLOT_TOLERANCE
+var formation_duration_multiplier := 1.0
 
 var completed_a_count := 0
 var completed_b_count := 0
@@ -93,6 +96,16 @@ func reset_runtime(enabled: bool, new_run_sequence := 0) -> void:
 func set_neighbor_route_spans(a_span: int, b_span: int) -> void:
 	a_pair_neighbor_route_span = maxi(0, a_span)
 	b_pair_neighbor_route_span = maxi(0, b_span)
+
+
+func set_runtime_formation_tuning(
+	approach_speed: float,
+	completion_tolerance: float,
+	duration_multiplier: float
+) -> void:
+	formation_approach_speed = maxf(1.0, approach_speed)
+	formation_completion_tolerance = maxf(1.0, completion_tolerance)
+	formation_duration_multiplier = maxf(0.0, duration_multiplier)
 
 
 func update_formations(delta: float, active_enemies: Dictionary) -> void:
@@ -333,7 +346,7 @@ func create_forming_a(first, second, active_enemies: Dictionary):
 		PrototypeConfig.FORMATION_LEVEL_A,
 		PrototypeConfig.FORMATION_STATE_FORMING_A,
 		members,
-		PrototypeConfig.FORMATION_A_DURATION
+		PrototypeConfig.FORMATION_A_DURATION * formation_duration_multiplier
 	)
 	group.configure_lock(
 		StringName(first.route_group_id),
@@ -392,7 +405,7 @@ func create_forming_b(first_a, second_a, active_enemies: Dictionary):
 		PrototypeConfig.FORMATION_LEVEL_B,
 		PrototypeConfig.FORMATION_STATE_FORMING_B,
 		all_members,
-		PrototypeConfig.FORMATION_B_DURATION,
+		PrototypeConfig.FORMATION_B_DURATION * formation_duration_multiplier,
 		PrototypeConfig.get_formation_effect(
 			StringName(first_a.monster_type),
 			PrototypeConfig.FORMATION_LEVEL_A
@@ -475,6 +488,9 @@ func complete_a_group(group, active_enemies: Dictionary, count_completion: bool)
 			"lock_runtime_elapsed": group.lock_runtime_elapsed,
 			"completion_runtime_elapsed": runtime_elapsed,
 			"lock_to_complete_duration": group.completion_elapsed,
+			"completion_slot_error": get_maximum_slot_error(
+				group.meeting_center, group.slot_assignments, active_enemies
+			),
 			"center": center if center != null else Vector2.ZERO,
 		})
 		completed_a_by_type[group.monster_type] = int(
@@ -515,6 +531,7 @@ func complete_b_group(group, active_enemies: Dictionary) -> void:
 	completed_b_observations.append({
 		"formation_id": group.formation_id,
 		"monster_type": group.monster_type,
+		"source_a_ids": group.source_a_ids.duplicate(),
 		"center": center if center != null else Vector2.ZERO,
 		"elapsed": runtime_elapsed,
 		"formation_anchor_route_index": group.formation_anchor_route_index,
@@ -524,6 +541,9 @@ func complete_b_group(group, active_enemies: Dictionary) -> void:
 		"initial_slot_error": group.initial_slot_error,
 		"lock_runtime_elapsed": group.lock_runtime_elapsed,
 		"lock_to_complete_duration": group.completion_elapsed,
+		"completion_slot_error": get_maximum_slot_error(
+			group.meeting_center, group.slot_assignments, active_enemies
+		),
 	})
 	sync_group_to_members(group, active_enemies)
 
@@ -955,16 +975,14 @@ func apply_group_steering(
 		var temporary_multiplier := 1.0
 		if is_forming:
 			temporary_multiplier = PrototypeConfig.FORMING_FORWARD_SPEED_MULTIPLIER
-			if enemy.position.x > target_position.x \
-					+ PrototypeConfig.FORMATION_SLOT_TOLERANCE:
+			if enemy.position.x > target_position.x + formation_completion_tolerance:
 				temporary_multiplier = 1.12
-			elif enemy.position.x < target_position.x \
-					- PrototypeConfig.FORMATION_SLOT_TOLERANCE:
+			elif enemy.position.x < target_position.x - formation_completion_tolerance:
 				temporary_multiplier = 0.62
 		var error: float = enemy.apply_formation_slot_target(
 			target_position,
 			delta,
-			PrototypeConfig.FORMATION_SLOT_MOVE_SPEED
+			formation_approach_speed
 				if is_forming
 				else PrototypeConfig.COMPLETE_FORMATION_SLOT_MAINTENANCE_SPEED,
 			temporary_multiplier
@@ -973,7 +991,7 @@ func apply_group_steering(
 	var updated_center: Variant = get_group_center(group, active_enemies)
 	if updated_center != null:
 		group.meeting_center = updated_center
-	if maximum_error <= PrototypeConfig.FORMATION_SLOT_TOLERANCE:
+	if maximum_error <= formation_completion_tolerance:
 		return 1.0
 	var reference_distance := (
 		maxf(PrototypeConfig.A_PAIR_RADIUS_X, PrototypeConfig.A_PAIR_RADIUS_Y)
@@ -983,7 +1001,7 @@ func apply_group_steering(
 	return clampf(
 		1.0
 			- (
-				maximum_error - PrototypeConfig.FORMATION_SLOT_TOLERANCE
+				maximum_error - formation_completion_tolerance
 			) / reference_distance,
 		0.0,
 		0.999
@@ -1319,6 +1337,8 @@ func get_stats_snapshot(active_enemies: Dictionary) -> Dictionary:
 		"runtime_elapsed": runtime_elapsed,
 		"active_group_count": groups.size(),
 		"member_assignment_count": member_to_group.size(),
+		"formation_approach_speed": formation_approach_speed,
+		"formation_completion_tolerance": formation_completion_tolerance,
 	}
 
 
@@ -1350,33 +1370,16 @@ func draw_formation_group(group) -> void:
 	logic_center /= float(logic_positions.size())
 	var center := map_visual_position(logic_center)
 	if group.formation_state == PrototypeConfig.FORMATION_STATE_FORMING_A:
-		draw_line(positions[0], positions[1], Color(color, 0.62), 1.5, true)
-		draw_slot_targets(group, logic_center, color)
 		draw_formation_label(
 			center,
-			"A锁定靠拢 %d%%" % int(round(group.formation_progress * 100.0)),
-			color
+			"配对靠拢 %d%%" % int(round(group.formation_progress * 100.0)),
+			Color(color, 0.72)
 		)
 	elif group.formation_state == PrototypeConfig.FORMATION_STATE_FORMING_B:
-		var first_center: Variant = get_members_center(
-			group.source_a_member_sets[0], last_active_enemies
-		)
-		var second_center: Variant = get_members_center(
-			group.source_a_member_sets[1], last_active_enemies
-		)
-		if first_center != null and second_center != null:
-			draw_line(
-				map_visual_position(first_center),
-				map_visual_position(second_center),
-				Color(color, 0.75),
-				2.0,
-				true
-			)
-		draw_slot_targets(group, logic_center, color)
 		draw_formation_label(
 			center,
-			"B锁定靠拢 %d%%" % int(round(group.formation_progress * 100.0)),
-			color
+			"阵组靠拢 %d%%" % int(round(group.formation_progress * 100.0)),
+			Color(color, 0.72)
 		)
 	elif group.formation_level == PrototypeConfig.FORMATION_LEVEL_A:
 		draw_line(positions[0], positions[1], color, 3.0, true)

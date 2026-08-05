@@ -165,6 +165,11 @@ func invalidate() -> void:
 
 
 func get_snapshot() -> Dictionary:
+	var display_state: StringName = &"SEARCHING"
+	if formation_state in [&"FORMING_A_LOCKED", &"FORMING_B_LOCKED"]:
+		display_state = &"APPROACHING"
+	elif formation_state == &"COMPLETE":
+		display_state = &"FORMED_B" if formation_level == &"B" else &"FORMED_A"
 	var copied_source_members: Array = []
 	for source_members: Array in source_a_member_sets:
 		copied_source_members.append(source_members.duplicate())
@@ -177,6 +182,8 @@ func get_snapshot() -> Dictionary:
 		"formation_zone_type": formation_zone_type,
 		"formation_level": formation_level,
 		"formation_state": formation_state,
+		"display_state": display_state,
+		"formal_visual_visible": formation_state == &"COMPLETE",
 		"member_ids": member_ids.duplicate(),
 		"source_a_ids": source_a_ids.duplicate(),
 		"source_a_member_sets": copied_source_members,

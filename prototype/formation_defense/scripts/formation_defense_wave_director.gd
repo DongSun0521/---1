@@ -19,6 +19,7 @@ const STATE_NAMES := {
 	State.COMPLETED: "COMPLETED",
 	State.STOPPED: "STOPPED",
 }
+const PRESSURE_SAMPLE_INTERVAL := 5.0
 
 var state: State = State.IDLE
 var battle_config: Dictionary = {}
@@ -50,6 +51,15 @@ var current_wave_generated := 0
 var current_wave_resolved := 0
 var current_wave_killed := 0
 var current_wave_leaked := 0
+var wave_records: Array[Dictionary] = []
+var pressure_samples: Array[Dictionary] = []
+var max_active_enemy_count := 0
+var longest_non_countdown_empty_time := 0.0
+var current_non_countdown_empty_time := 0.0
+var next_pressure_sample_time := PRESSURE_SAMPLE_INTERVAL
+var telemetry_wave_index := -1
+var telemetry_formation_baseline: Dictionary = {}
+var final_village_durability := -1
 
 
 func configure(
@@ -97,6 +107,15 @@ func reset_runtime() -> void:
 	total_killed = 0
 	total_leaked = 0
 	reset_current_wave_stats()
+	wave_records = build_wave_records(battle_config)
+	pressure_samples.clear()
+	max_active_enemy_count = 0
+	longest_non_countdown_empty_time = 0.0
+	current_non_countdown_empty_time = 0.0
+	next_pressure_sample_time = PRESSURE_SAMPLE_INTERVAL
+	telemetry_wave_index = -1
+	telemetry_formation_baseline.clear()
+	final_village_durability = -1
 	rng.seed = int(battle_config.get("random_seed", 1))
 
 
@@ -179,6 +198,10 @@ func start_wave(wave_index: int) -> void:
 	reset_current_wave_stats()
 	scheduled_events = build_wave_events(waves[wave_index], wave_index)
 	current_wave_planned = scheduled_events.size()
+	var record := get_wave_record(wave_index)
+	if not record.is_empty():
+		record["start_time"] = battle_time
+		record["planned"] = current_wave_planned
 	state = State.SPAWNING
 
 
@@ -195,6 +218,10 @@ func process_due_spawn_events() -> void:
 		triggered_subwaves[int(event.get("subwave_index", -1))] = true
 		total_generated += 1
 		current_wave_generated += 1
+		var record := get_wave_record(int(event.get("wave_index", current_wave_index)))
+		if not record.is_empty():
+			record["generated"] = int(record.get("generated", 0)) + 1
+			record["last_spawn_time"] = battle_time
 		var trace_entry := event.duplicate(true)
 		trace_entry["global_spawn_sequence"] = total_generated
 		trace_entry["emitted_battle_time"] = battle_time
@@ -230,6 +257,13 @@ func notify_enemy_resolved(runtime_id: StringName, outcome: StringName) -> void:
 			current_wave_killed += 1
 		else:
 			current_wave_leaked += 1
+	var record := get_wave_record(wave_index)
+	if not record.is_empty():
+		record["resolved"] = int(record.get("resolved", 0)) + 1
+		if outcome == &"KILLED":
+			record["killed"] = int(record.get("killed", 0)) + 1
+		else:
+			record["leaked"] = int(record.get("leaked", 0)) + 1
 	complete_current_wave_if_ready()
 
 
@@ -240,6 +274,12 @@ func complete_current_wave_if_ready() -> void:
 		return
 	if current_wave_resolved < current_wave_planned:
 		return
+	var record := get_wave_record(current_wave_index)
+	if not record.is_empty():
+		record["end_time"] = battle_time
+		record["duration"] = battle_time - float(record.get("start_time", battle_time))
+		var last_spawn_time := float(record.get("last_spawn_time", battle_time))
+		record["cleanup_tail"] = maxf(0.0, battle_time - last_spawn_time)
 	var waves: Array = battle_config.get("waves", [])
 	if current_wave_index >= waves.size() - 1:
 		state = State.COMPLETED
@@ -248,6 +288,66 @@ func complete_current_wave_if_ready() -> void:
 	pending_wave_index = current_wave_index + 1
 	begin_countdown(maxf(0.0, float(battle_config.get("inter_wave_delay", 0.0))))
 	resolve_zero_countdown()
+
+
+func record_battle_telemetry(
+	delta: float,
+	active_enemy_count: int,
+	formation_stats: Dictionary,
+	village_durability: int
+) -> void:
+	final_village_durability = village_durability
+	max_active_enemy_count = maxi(max_active_enemy_count, active_enemy_count)
+	if state in [State.SPAWNING, State.CLEANUP] and active_enemy_count == 0:
+		current_non_countdown_empty_time += maxf(0.0, delta)
+		longest_non_countdown_empty_time = maxf(
+			longest_non_countdown_empty_time,
+			current_non_countdown_empty_time
+		)
+	else:
+		current_non_countdown_empty_time = 0.0
+	while battle_time + 0.000001 >= next_pressure_sample_time:
+		pressure_samples.append({
+			"time": next_pressure_sample_time,
+			"active": active_enemy_count,
+			"wave_index": current_wave_index,
+		})
+		next_pressure_sample_time += PRESSURE_SAMPLE_INTERVAL
+	if current_wave_index < 0:
+		return
+	if telemetry_wave_index != current_wave_index:
+		telemetry_wave_index = current_wave_index
+		telemetry_formation_baseline = extract_formation_totals(formation_stats)
+	var record := get_wave_record(current_wave_index)
+	if record.is_empty():
+		return
+	record["peak_active"] = maxi(int(record.get("peak_active", 0)), active_enemy_count)
+	if state == State.CLEANUP and active_enemy_count == 1:
+		record["single_enemy_tail_time"] = float(
+			record.get("single_enemy_tail_time", 0.0)
+		) + maxf(0.0, delta)
+	elif active_enemy_count > 1:
+		record["single_enemy_tail_time"] = 0.0
+	var totals := extract_formation_totals(formation_stats)
+	for key: StringName in [&"completed_a", &"completed_b", &"interrupted", &"downgraded"]:
+		record[key] = maxi(
+			0,
+			int(totals.get(key, 0)) - int(telemetry_formation_baseline.get(key, 0))
+		)
+
+
+func get_pacing_snapshot() -> Dictionary:
+	return {
+		"battle_time": battle_time,
+		"wave_records": wave_records.duplicate(true),
+		"pressure_samples": pressure_samples.duplicate(true),
+		"max_active_enemy_count": max_active_enemy_count,
+		"longest_non_countdown_empty_time": longest_non_countdown_empty_time,
+		"recent_pressure_sample": (
+			pressure_samples[-1].duplicate(true) if not pressure_samples.is_empty() else {}
+		),
+		"final_village_durability": final_village_durability,
+	}
 
 
 func build_wave_events(wave: Dictionary, wave_index: int) -> Array[Dictionary]:
@@ -260,6 +360,10 @@ func build_wave_events(wave: Dictionary, wave_index: int) -> Array[Dictionary]:
 		var groups: Array = subwave.get("spawn_groups", [])
 		for group_index in range(groups.size()):
 			var group: Dictionary = groups[group_index]
+			var profile_id := StringName(group.get("enemy_profile_id", &""))
+			var profile_overrides: Dictionary = Dictionary(
+				battle_config.get("enemy_profile_overrides", {})
+			).get(profile_id, {})
 			var count := int(group.get("count", 0))
 			var interval := float(group.get("spawn_interval", 0.0))
 			for item_index in range(count):
@@ -271,8 +375,9 @@ func build_wave_events(wave: Dictionary, wave_index: int) -> Array[Dictionary]:
 					"item_index": item_index,
 					"stable_order": stable_order,
 					"due_time": start_offset + interval * float(item_index),
-					"enemy_profile_id": StringName(group.get("enemy_profile_id", &"")),
-					"max_health": int(group.get("max_health", 0)),
+					"enemy_profile_id": profile_id,
+					"max_health": int(group.get("max_health", profile_overrides.get("max_health", 0))),
+					"move_speed": float(group.get("move_speed", profile_overrides.get("move_speed", 0.0))),
 					"allowed_spawn_points": group.get("allowed_spawn_points", []).duplicate(),
 					"allowed_lanes": group.get("allowed_lanes", []).duplicate(),
 					"selection_mode": StringName(group.get("selection_mode", &"random")),
@@ -369,6 +474,10 @@ func get_snapshot() -> Dictionary:
 		"tracked_enemy_count": runtime_enemy_wave.size(),
 		"spawn_trace": spawn_trace.duplicate(true),
 		"validation_errors": validation_errors.duplicate(),
+		"current_wave_display_name": get_wave_display_name(
+			pending_wave_index if state == State.COUNTDOWN else current_wave_index
+		),
+		"pacing": get_pacing_snapshot(),
 	}
 
 
@@ -378,6 +487,11 @@ func get_hud_text() -> String:
 		int(snapshot.display_wave_number),
 		int(snapshot.total_waves),
 	]
+	var wave_name := get_wave_display_name(
+		pending_wave_index if state == State.COUNTDOWN else current_wave_index
+	)
+	if not wave_name.is_empty():
+		wave_text += "　%s" % wave_name
 	match state:
 		State.COUNTDOWN:
 			return "%s｜下一波：%.1f秒" % [wave_text, countdown_remaining]
@@ -417,6 +531,57 @@ func reset_current_wave_stats() -> void:
 	current_wave_leaked = 0
 
 
+func get_wave_display_name(wave_index: int) -> String:
+	var waves: Array = battle_config.get("waves", [])
+	if wave_index < 0 or wave_index >= waves.size():
+		return ""
+	return String(Dictionary(waves[wave_index]).get("display_name", ""))
+
+
+func get_wave_record(wave_index: int) -> Dictionary:
+	if wave_index < 0 or wave_index >= wave_records.size():
+		return {}
+	return wave_records[wave_index]
+
+
+static func build_wave_records(config: Dictionary) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	var waves: Array = config.get("waves", [])
+	for wave_index in range(waves.size()):
+		var wave: Dictionary = waves[wave_index]
+		result.append({
+			"wave_index": wave_index,
+			"wave_id": StringName(wave.get("wave_id", &"")),
+			"display_name": String(wave.get("display_name", "")),
+			"planned": count_wave_enemies(wave),
+			"generated": 0,
+			"resolved": 0,
+			"killed": 0,
+			"leaked": 0,
+			"peak_active": 0,
+			"completed_a": 0,
+			"completed_b": 0,
+			"interrupted": 0,
+			"downgraded": 0,
+			"start_time": -1.0,
+			"last_spawn_time": -1.0,
+			"end_time": -1.0,
+			"duration": 0.0,
+			"cleanup_tail": 0.0,
+			"single_enemy_tail_time": 0.0,
+		})
+	return result
+
+
+static func extract_formation_totals(stats: Dictionary) -> Dictionary:
+	return {
+		"completed_a": int(stats.get("completed_a_count", 0)),
+		"completed_b": int(stats.get("completed_b_count", 0)),
+		"interrupted": int(stats.get("interrupted_count", 0)),
+		"downgraded": int(stats.get("downgrade_count", 0)),
+	}
+
+
 static func count_planned_enemies(config: Dictionary) -> int:
 	var total := 0
 	for wave: Dictionary in config.get("waves", []):
@@ -445,6 +610,21 @@ static func validate_battle_config(
 		errors.append("initial_countdown must be non-negative")
 	if float(config.get("inter_wave_delay", 0.0)) < 0.0:
 		errors.append("inter_wave_delay must be non-negative")
+	if config.has("formation_approach_speed") and float(config.formation_approach_speed) <= 0.0:
+		errors.append("formation_approach_speed must be greater than zero")
+	if config.has("formation_completion_tolerance") and float(config.formation_completion_tolerance) <= 0.0:
+		errors.append("formation_completion_tolerance must be greater than zero")
+	if config.has("formation_duration_multiplier") and float(config.formation_duration_multiplier) < 0.0:
+		errors.append("formation_duration_multiplier must be non-negative")
+	for raw_profile_id in Dictionary(config.get("enemy_profile_overrides", {})).keys():
+		var profile_id := StringName(raw_profile_id)
+		var profile: Dictionary = config.enemy_profile_overrides[raw_profile_id]
+		if not valid_profiles.has(profile_id):
+			errors.append("enemy_profile_overrides references unknown profile %s" % profile_id)
+		if profile.has("max_health") and int(profile.max_health) <= 0:
+			errors.append("profile %s max_health must be greater than zero" % profile_id)
+		if profile.has("move_speed") and float(profile.move_speed) <= 0.0:
+			errors.append("profile %s move_speed must be greater than zero" % profile_id)
 	var waves: Array = config.get("waves", [])
 	if waves.is_empty():
 		errors.append("battle must contain at least one wave")

@@ -674,6 +674,7 @@ func start_battle() -> bool:
 		is_formation_scenario_enabled(),
 		run_sequence
 	)
+	apply_formation_runtime_tuning()
 	command_controller.reset_for_restart()
 	battle_state = BattleState.RUNNING
 	if is_wave_scenario_enabled():
@@ -724,6 +725,7 @@ func restart_battle() -> void:
 		is_formation_scenario_enabled(),
 		run_sequence
 	)
+	apply_formation_runtime_tuning()
 	command_controller.reset_for_restart()
 	if is_wave_scenario_enabled():
 		battle_state = BattleState.RUNNING
@@ -775,6 +777,13 @@ func simulate_step(delta: float) -> void:
 		simulate_character_actions(safe_delta)
 		formation_manager.update_formations(0.0, active_enemies)
 		update_enemy_blocking()
+	if is_wave_scenario_enabled():
+		wave_director.record_battle_telemetry(
+			safe_delta,
+			active_enemies.size(),
+			get_formation_stats_snapshot(),
+			village_durability
+		)
 	evaluate_victory()
 	update_ui()
 
@@ -838,6 +847,9 @@ func handle_wave_spawn_requested(spawn_event: Dictionary) -> void:
 	var configured_max_health := int(spawn_event.get("max_health", 0))
 	if configured_max_health > 0:
 		spawn_overrides["max_health"] = configured_max_health
+	var configured_move_speed := float(spawn_event.get("move_speed", 0.0))
+	if configured_move_speed > 0.0:
+		spawn_overrides["move_speed"] = configured_move_speed
 	var enemy = spawn_enemy_for_route(
 		StringName(spawn_event.get("route_id", &"")),
 		StringName(spawn_event.get("enemy_profile_id", &"charge")),
@@ -1495,6 +1507,20 @@ func is_formation_scenario_enabled() -> bool:
 	return bool(scenario.get("formations_enabled", false))
 
 
+func apply_formation_runtime_tuning() -> void:
+	var tuning: Dictionary = {}
+	if is_wave_scenario_enabled():
+		var scenario := PrototypeConfig.get_scenario(selected_scenario_id)
+		tuning = PrototypeConfig.get_wave_battle_config(
+			StringName(scenario.get("wave_battle_id", &""))
+		)
+	formation_manager.set_runtime_formation_tuning(
+		float(tuning.get("formation_approach_speed", PrototypeConfig.FORMATION_SLOT_MOVE_SPEED)),
+		float(tuning.get("formation_completion_tolerance", PrototypeConfig.FORMATION_SLOT_TOLERANCE)),
+		float(tuning.get("formation_duration_multiplier", 1.0))
+	)
+
+
 func run_formation_demo_control_resistance() -> void:
 	if demo_control_resistance_triggered:
 		return
@@ -1639,11 +1665,29 @@ func update_ui() -> void:
 	compact_state_label.text = "状态：%s" % get_state_name()
 	if is_wave_scenario_enabled():
 		var wave_snapshot: Dictionary = wave_director.get_snapshot()
+		var pacing: Dictionary = wave_snapshot.get("pacing", {})
+		var pacing_records: Array = pacing.get("wave_records", [])
+		var pacing_index := int(wave_snapshot.get("current_wave_index", -1))
+		var pacing_record: Dictionary = (
+			pacing_records[pacing_index]
+			if pacing_index >= 0 and pacing_index < pacing_records.size()
+			else {}
+		)
+		var recent_pressure: Dictionary = pacing.get("recent_pressure_sample", {})
+		var current_wave_duration := float(pacing_record.get("duration", 0.0))
+		if float(pacing_record.get("end_time", -1.0)) < 0.0:
+			current_wave_duration = maxf(
+				0.0,
+				float(pacing.get("battle_time", 0.0))
+					- float(pacing_record.get("start_time", pacing.get("battle_time", 0.0)))
+			)
 		compact_wave_label.text = wave_director.get_hud_text()
 		wave_debug_label.text = (
 			"波次 %d/%d｜状态 %s｜子波次 %d/%d｜下一事件 %.1f秒"
 			+ "\n本波 计划%d / 已生成%d / 活动%d / 击杀%d / 漏怪%d"
 			+ "｜全场 计划%d / 已生成%d / 已结算%d / 击杀%d / 漏怪%d"
+			+ "\n节奏 累计%.1f秒 / 本波%.1f秒｜峰值%d｜A/B %d/%d｜耐久%d"
+			+ "｜最长空场%.1f秒｜最近采样 %.1f秒:%d"
 		) % [
 			int(wave_snapshot.get("display_wave_number", 0)),
 			int(wave_snapshot.get("total_waves", 0)),
@@ -1661,6 +1705,15 @@ func update_ui() -> void:
 			int(wave_snapshot.get("total_resolved", 0)),
 			int(wave_snapshot.get("total_killed", 0)),
 			int(wave_snapshot.get("total_leaked", 0)),
+			float(pacing.get("battle_time", 0.0)),
+			current_wave_duration,
+			int(pacing_record.get("peak_active", 0)),
+			int(pacing_record.get("completed_a", 0)),
+			int(pacing_record.get("completed_b", 0)),
+			village_durability,
+			float(pacing.get("longest_non_countdown_empty_time", 0.0)),
+			float(recent_pressure.get("time", 0.0)),
+			int(recent_pressure.get("active", 0)),
 		]
 	else:
 		compact_wave_label.text = "波次：V2-5旧测试方案"

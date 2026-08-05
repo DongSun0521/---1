@@ -646,6 +646,138 @@ const WAVE_BATTLES := {
 			},
 		],
 	},
+	&"v2_5c_pacing": {
+		"battle_id": &"v2_5c_pacing",
+		"display_name": "V2-5C 3～4分钟节奏验证",
+		"random_seed": 2506,
+		"initial_countdown": 3.0,
+		"inter_wave_delay": 4.0,
+		"enemy_profile_overrides": {
+			&"charge": {"max_health": 91, "move_speed": 42.0},
+			&"shield": {"max_health": 91, "move_speed": 42.0},
+		},
+		"formation_approach_speed": 52.0,
+		"formation_completion_tolerance": 12.0,
+		"formation_duration_multiplier": 0.0,
+		"waves": [
+			{
+				"wave_id": &"pacing_1",
+				"display_name": "开场熟悉",
+				"subwaves": [{
+					"start_offset": 0.0,
+					"spawn_groups": [{
+						"enemy_profile_id": &"charge", "count": 4,
+						"spawn_interval": 2.0,
+						"allowed_spawn_points": [&"spawn_upper_outer", &"spawn_lower_outer"],
+						"allowed_lanes": [&"formation_upper_outer", &"formation_lower_outer"],
+						"selection_mode": &"round_robin",
+					}],
+				}],
+			},
+			{
+				"wave_id": &"pacing_2",
+				"display_name": "战场展开",
+				"subwaves": [
+					{"start_offset": 0.0, "spawn_groups": [{
+						"enemy_profile_id": &"charge", "count": 3, "spawn_interval": 1.3,
+						"allowed_spawn_points": [&"spawn_upper", &"spawn_center"],
+						"allowed_lanes": [&"formation_upper", &"formation_center"],
+						"selection_mode": &"round_robin",
+					}]},
+					{"start_offset": 8.0, "spawn_groups": [{
+						"enemy_profile_id": &"shield", "count": 2, "spawn_interval": 2.0,
+						"allowed_spawn_points": [&"spawn_lower"],
+						"allowed_lanes": [&"formation_lower"],
+						"selection_mode": &"round_robin",
+					}]},
+				],
+			},
+			{
+				"wave_id": &"pacing_3",
+				"display_name": "组阵来袭",
+				"subwaves": [
+					{"start_offset": 0.0, "spawn_groups": [{
+						"enemy_profile_id": &"charge", "count": 4, "spawn_interval": 0.65,
+						"allowed_spawn_points": [&"spawn_upper_outer", &"spawn_upper"],
+						"allowed_lanes": [&"formation_upper_outer", &"formation_upper"],
+						"selection_mode": &"round_robin",
+					}]},
+					{"start_offset": 7.0, "spawn_groups": [{
+						"enemy_profile_id": &"shield", "count": 2, "spawn_interval": 1.2,
+						"allowed_spawn_points": [&"spawn_center"],
+						"allowed_lanes": [&"formation_center"],
+						"selection_mode": &"round_robin",
+					}]},
+				],
+			},
+			{
+				"wave_id": &"pacing_4",
+				"display_name": "错峰推进",
+				"subwaves": [
+					{"start_offset": 0.0, "spawn_groups": [{
+						"enemy_profile_id": &"charge", "count": 3, "spawn_interval": 1.5,
+						"allowed_spawn_points": [&"spawn_upper_outer", &"spawn_upper"],
+						"allowed_lanes": [&"formation_upper_outer", &"formation_upper"],
+						"selection_mode": &"round_robin",
+					}]},
+					{"start_offset": 7.0, "spawn_groups": [{
+						"enemy_profile_id": &"shield", "count": 2, "spawn_interval": 1.5,
+						"allowed_spawn_points": [&"spawn_center"],
+						"allowed_lanes": [&"formation_center"],
+						"selection_mode": &"round_robin",
+					}]},
+					{"start_offset": 10.0, "spawn_groups": [{
+						"enemy_profile_id": &"charge", "count": 2, "spawn_interval": 1.5,
+						"allowed_spawn_points": [&"spawn_lower", &"spawn_lower_outer"],
+						"allowed_lanes": [&"formation_lower", &"formation_lower_outer"],
+						"selection_mode": &"round_robin",
+					}]},
+				],
+			},
+			{
+				"wave_id": &"pacing_5",
+				"display_name": "持续高压",
+				"subwaves": [
+					{"start_offset": 0.0, "spawn_groups": [{
+						"enemy_profile_id": &"shield", "count": 4, "spawn_interval": 0.25,
+						"allowed_spawn_points": [&"spawn_upper_outer", &"spawn_center"],
+						"allowed_lanes": [&"formation_upper_outer", &"formation_center"],
+						"selection_mode": &"round_robin",
+					}]},
+					{"start_offset": 4.0, "spawn_groups": [{
+						"enemy_profile_id": &"charge", "count": 5, "spawn_interval": 0.8,
+						"allowed_spawn_points": [&"spawn_center", &"spawn_lower", &"spawn_lower_outer"],
+						"allowed_lanes": [&"formation_center", &"formation_lower", &"formation_lower_outer"],
+						"selection_mode": &"round_robin",
+					}]},
+				],
+			},
+			{
+				"wave_id": &"pacing_6",
+				"display_name": "最终高潮",
+				"subwaves": [
+					{"start_offset": 0.0, "spawn_groups": [{
+						"enemy_profile_id": &"shield", "count": 4, "spawn_interval": 0.25,
+						"allowed_spawn_points": [&"spawn_upper_outer", &"spawn_center"],
+						"allowed_lanes": [&"formation_upper_outer", &"formation_center"],
+						"selection_mode": &"round_robin",
+					}]},
+					{"start_offset": 5.0, "spawn_groups": [{
+						"enemy_profile_id": &"charge", "count": 5, "spawn_interval": 0.6,
+						"allowed_spawn_points": [&"spawn_center", &"spawn_lower"],
+						"allowed_lanes": [&"formation_center", &"formation_lower"],
+						"selection_mode": &"round_robin",
+					}]},
+					{"start_offset": 6.5, "spawn_groups": [{
+						"enemy_profile_id": &"shield", "count": 4, "spawn_interval": 0.4,
+						"allowed_spawn_points": [&"spawn_upper_outer", &"spawn_lower_outer"],
+						"allowed_lanes": [&"formation_upper_outer", &"formation_lower_outer"],
+						"selection_mode": &"round_robin",
+					}]},
+				],
+			},
+		],
+	},
 }
 
 const SCENARIO_IDS: Array[StringName] = [
@@ -655,6 +787,7 @@ const SCENARIO_IDS: Array[StringName] = [
 	&"formation_demo",
 	&"command_demo",
 	&"wave_validation",
+	&"pacing_validation",
 ]
 const SCENARIOS := {
 	&"survival": {
@@ -836,6 +969,16 @@ const SCENARIOS := {
 			&"spawn_center",
 			&"spawn_lower",
 			&"spawn_lower_outer",
+		],
+	},
+	&"pacing_validation": {
+		"display_name": "V2-5C 3～4分钟节奏验证",
+		"description": "六波升压、缓和与最终高潮的完整无人节奏验证。",
+		"formations_enabled": true,
+		"wave_battle_id": &"v2_5c_pacing",
+		"active_spawn_point_ids": [
+			&"spawn_upper_outer", &"spawn_upper", &"spawn_center",
+			&"spawn_lower", &"spawn_lower_outer",
 		],
 	},
 }
@@ -1204,7 +1347,7 @@ static func get_character_definition(character_id: StringName) -> Dictionary:
 static func get_recommended_deployment(
 	scenario_id: StringName = &""
 ) -> Dictionary:
-	if scenario_id in [&"formation_demo", &"command_demo", &"wave_validation"]:
+	if scenario_id in [&"formation_demo", &"command_demo", &"wave_validation", &"pacing_validation"]:
 		return FORMATION_DEMO_DEPLOYMENT.duplicate(true)
 	return RECOMMENDED_DEPLOYMENT.duplicate(true)
 
