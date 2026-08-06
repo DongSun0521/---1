@@ -6,6 +6,7 @@ const Enemy := preload("res://prototype/formation_defense/scripts/formation_defe
 const WaveDirector := preload("res://prototype/formation_defense/scripts/formation_defense_wave_director.gd")
 const STEP := 0.1
 const LEGACY_STEP := 0.25
+const PREPARE_REACTION_DELAY := 0.5
 const MODE_UNATTENDED: StringName = &"UNATTENDED"
 const MODE_POST_FORMATION_FOCUS: StringName = &"POST_FORMATION_FOCUS"
 const MODE_PRE_FORMATION_INTERCEPT: StringName = &"PRE_FORMATION_INTERCEPT"
@@ -48,6 +49,14 @@ func run() -> void:
 	for wave: Dictionary in waves:
 		wave_counts.append(WaveDirector.count_wave_enemies(wave))
 	check(wave_counts == [2, 4, 16], "three validation waves plan 2, 4 and 16 enemies")
+	check(
+		is_equal_approx(float(config.get("b_formation_prepare_duration", -1.0)), 3.0)
+			and is_zero_approx(CONFIG.DEFAULT_B_FORMATION_PREPARE_DURATION)
+			and not CONFIG.get_wave_battle_config(&"v2_5c_pacing").has(
+				"b_formation_prepare_duration"
+			),
+		"V2-6A alone enables a configured 3 second B preparation; legacy default stays zero"
+	)
 
 	var contracts := run_damage_contracts()
 	check(contracts.normal_reduction_zero, "normal monster formation damage reduction stays zero")
@@ -86,9 +95,10 @@ func run() -> void:
 	)
 	check(
 		unattended_first.saw_approach_zero
+			and unattended_first.saw_preparing_zero
 			and unattended_first.saw_a_effect
 			and unattended_first.saw_b_effect,
-		"battle observes zero approach, 20 percent A and 35 percent B effects"
+		"battle observes zero approach/preparation, 20 percent A and 35 percent B effects"
 	)
 	check(
 		unattended_first.visual_sync_valid
@@ -98,13 +108,29 @@ func run() -> void:
 	)
 	check(
 		unattended_first.saw_guard_b_warning
+			and unattended_first.saw_guard_b_preparing_visual
 			and unattended_first.warning_state_valid
-			and unattended_first.saw_warning_clear_on_complete
+			and unattended_first.preparing_visual_state_valid
+			and unattended_first.saw_preparing_clear_on_complete
 			and post_first.warning_state_valid
-			and post_first.saw_warning_clear_on_complete
+			and post_first.preparing_visual_state_valid
+			and post_first.saw_preparing_clear_on_complete
 			and pre_first.warning_state_valid
-			and pre_first.saw_warning_clear_on_complete,
-		"guard B warning is visible only during a real forming-B approach"
+			and pre_first.preparing_visual_state_valid,
+		"forming and preparing warnings map only to their real B states and clear on completion"
+	)
+	check(
+		unattended_first.guard_prepare_completed >= 1
+			and unattended_first.completed_prepare_duration_valid
+			and unattended_first.saw_preparing_forward_progress
+			and has_full_b_state_chain(unattended_first.guard_prepare_state_sequences),
+		"an unattended guard B completes only after the full preparation while continuing forward"
+	)
+	check(
+		unattended_first.ordinary_preparing_visual_absent
+			and post_first.ordinary_preparing_visual_absent
+			and pre_first.ordinary_preparing_visual_absent,
+		"ordinary monsters never receive the formation-guard preparation warning visual"
 	)
 	check(
 		post_first.command_debug_valid and pre_first.command_debug_valid,
@@ -126,9 +152,16 @@ func run() -> void:
 		"post-formation B group clears only when the first member dies and natural downgrade runs"
 	)
 	check(
-		pre_first.command_state == String(CONFIG.FORMATION_STATE_FORMING_B)
-			and is_zero_approx(pre_first.command_reduction),
-		"pre-formation interception is issued during the real B approach with zero reduction"
+		pre_first.command_state == String(CONFIG.FORMATION_STATE_PREPARING_B)
+			and is_zero_approx(pre_first.command_reduction)
+			and absf(float(pre_first.command_reaction_delay) - PREPARE_REACTION_DELAY) <= STEP + 0.001,
+		"pre-formation interception waits 0.5 seconds, then uses the real preparing state at zero reduction"
+	)
+	check(
+		pre_first.command_prepare_outcome == String(CONFIG.INTERRUPTION_MEMBER_DIED)
+			and pre_first.first_kill_prepare_remaining > 0.0
+			and pre_first.guard_prepare_member_loss >= 1,
+		"normal focused attacks kill a member before countdown expiry and cancel a real preparation"
 	)
 	check(
 		post_first.command_did_not_mutate_formation
@@ -331,12 +364,16 @@ func run_validation_battle(mode: StringName) -> Dictionary:
 	var command_did_not_mutate_formation := true
 	var target_kept_b_until_first_member_death := true
 	var saw_approach_zero := false
+	var saw_preparing_zero := false
 	var saw_a_effect := false
 	var saw_b_effect := false
 	var visual_sync_valid := true
 	var saw_guard_b_warning := false
 	var warning_state_valid := true
-	var saw_warning_clear_on_complete := false
+	var saw_guard_b_preparing_visual := false
+	var preparing_visual_state_valid := true
+	var ordinary_preparing_visual_absent := true
+	var saw_preparing_clear_on_complete := false
 	var command_debug_valid := mode == MODE_UNATTENDED
 	var profile_by_enemy_id: Dictionary = {}
 	var b_attempt_started_at: Dictionary = {}
@@ -344,6 +381,12 @@ func run_validation_battle(mode: StringName) -> Dictionary:
 	var b_resolved_attempt_ids: Dictionary = {}
 	var b_approach_durations: Array[float] = []
 	var b_complete_group_seconds := 0.0
+	var guard_prepare_starts: Dictionary = {}
+	var guard_prepare_start_progress: Dictionary = {}
+	var guard_prepare_state_sequences: Dictionary = {}
+	var saw_preparing_forward_progress := false
+	var command_prepare_started_at := -1.0
+	var command_prepare_remaining := -1.0
 	var ordinary_progress_at_command := 0.0
 	var ordinary_max_progress_after_command := 0.0
 	var steps := 0
@@ -364,6 +407,11 @@ func run_validation_battle(mode: StringName) -> Dictionary:
 					is_zero_approx(reduction) and visual_strength == 0
 				)
 				visual_sync_valid = visual_sync_valid and is_zero_approx(reduction) and visual_strength == 0
+			elif enemy.formation_state == CONFIG.FORMATION_STATE_PREPARING_B:
+				saw_preparing_zero = saw_preparing_zero or (
+					is_zero_approx(reduction) and visual_strength == 0
+				)
+				visual_sync_valid = visual_sync_valid and is_zero_approx(reduction) and visual_strength == 0
 			elif enemy.formation_state == &"COMPLETE" and enemy.formation_level == &"A":
 				saw_a_effect = true
 				visual_sync_valid = visual_sync_valid and is_equal_approx(reduction, 0.20) and visual_strength == 1
@@ -380,6 +428,9 @@ func run_validation_battle(mode: StringName) -> Dictionary:
 			var group_id := StringName(group.get("formation_id", &""))
 			current_group_ids[group_id] = true
 			var warning_visible := bool(group.get("forming_b_warning_visible", false))
+			var preparing_visual_visible := bool(group.get("preparing_b_visual_visible", false))
+			if preparing_visual_visible and StringName(group.get("monster_type", &"")) != &"formation_guard":
+				ordinary_preparing_visual_absent = false
 			if warning_visible:
 				saw_guard_b_warning = true
 				warning_state_valid = warning_state_valid and (
@@ -387,19 +438,54 @@ func run_validation_battle(mode: StringName) -> Dictionary:
 					and StringName(group.get("formation_level", &"")) == CONFIG.FORMATION_LEVEL_B
 					and StringName(group.get("formation_state", &"")) == CONFIG.FORMATION_STATE_FORMING_B
 				)
+			if preparing_visual_visible:
+				saw_guard_b_preparing_visual = true
+				preparing_visual_state_valid = preparing_visual_state_valid and (
+					StringName(group.get("monster_type", &"")) == &"formation_guard"
+					and StringName(group.get("formation_level", &"")) == CONFIG.FORMATION_LEVEL_B
+					and StringName(group.get("formation_state", &"")) == CONFIG.FORMATION_STATE_PREPARING_B
+				)
 			elif (
 				StringName(group.get("monster_type", &"")) == &"formation_guard"
 				and StringName(group.get("formation_level", &"")) == CONFIG.FORMATION_LEVEL_B
 				and StringName(group.get("formation_state", &"")) == CONFIG.FORMATION_STATE_COMPLETE
 			):
-				saw_warning_clear_on_complete = true
+				saw_preparing_clear_on_complete = true
 			if StringName(group.get("monster_type", &"")) != &"formation_guard" \
 					or StringName(group.get("formation_level", &"")) != CONFIG.FORMATION_LEVEL_B:
 				continue
 			var group_state := StringName(group.get("formation_state", &""))
+			var state_sequence: Array = guard_prepare_state_sequences.get(group_id, [])
+			if state_sequence.is_empty() or StringName(state_sequence.back()) != group_state:
+				state_sequence.append(group_state)
+				guard_prepare_state_sequences[group_id] = state_sequence
 			if group_state == CONFIG.FORMATION_STATE_FORMING_B:
 				if not b_attempt_started_at.has(group_id):
 					b_attempt_started_at[group_id] = float(controller.battle_elapsed)
+			elif group_state == CONFIG.FORMATION_STATE_PREPARING_B:
+				if not guard_prepare_starts.has(group_id):
+					var member_health: Dictionary = {}
+					var member_progress: Dictionary = {}
+					for member_id: StringName in group.get("member_ids", []):
+						var member = controller.active_enemies.get(member_id)
+						if not is_instance_valid(member):
+							continue
+						member_health[member_id] = int(member.current_health)
+						member_progress[member_id] = float(member.route_progress)
+					guard_prepare_starts[group_id] = {
+						"started_at": float(group.get("prepare_started_runtime_elapsed", -1.0)),
+						"observed_at": float(controller.battle_elapsed),
+						"member_health": member_health,
+					}
+					guard_prepare_start_progress[group_id] = member_progress
+				else:
+					var start_progress: Dictionary = guard_prepare_start_progress.get(group_id, {})
+					for member_id: StringName in group.get("member_ids", []):
+						var member = controller.active_enemies.get(member_id)
+						if is_instance_valid(member) and (
+							float(member.route_progress) > float(start_progress.get(member_id, member.route_progress)) + 0.0001
+						):
+							saw_preparing_forward_progress = true
 			elif group_state == CONFIG.FORMATION_STATE_COMPLETE:
 				complete_guard_b_count += 1
 				if b_attempt_started_at.has(group_id) and not b_completed_ids.has(group_id):
@@ -420,7 +506,7 @@ func run_validation_battle(mode: StringName) -> Dictionary:
 		var wave: Dictionary = controller.get_wave_snapshot()
 		var wave_index := int(wave.get("current_wave_index", -1))
 		if mode != MODE_UNATTENDED and wave_index >= 1 and public_focus_calls == 0:
-			var group := find_guard_b_for_mode(controller, mode)
+			var group := find_guard_b_for_mode(controller, mode, float(controller.battle_elapsed))
 			if not group.is_empty():
 				var members: Array = group.get("member_ids", []).duplicate()
 				var target_id := select_stable_full_health_member(controller, members)
@@ -445,6 +531,10 @@ func run_validation_battle(mode: StringName) -> Dictionary:
 					command_level = before_level
 					command_reduction = float(target.formation_player_damage_reduction)
 					command_group_id = before_group_id
+					command_prepare_started_at = float(
+						group.get("prepare_started_runtime_elapsed", -1.0)
+					)
+					command_prepare_remaining = float(group.get("prepare_remaining", -1.0))
 					ordinary_progress_at_command = get_max_active_progress(controller, &"charge")
 					ordinary_max_progress_after_command = ordinary_progress_at_command
 				if issue_focus_via_player_pointer(controller, target_id):
@@ -499,6 +589,29 @@ func run_validation_battle(mode: StringName) -> Dictionary:
 	var battle: Dictionary = controller.get_battle_snapshot()
 	var formation_stats: Dictionary = battle.get("formation_stats", {})
 	var prevented_by_profile: Dictionary = battle.get("formation_damage_prevented_by_profile", {})
+	var guard_prepare_observations: Array = []
+	var guard_prepare_completed := 0
+	var guard_prepare_member_loss := 0
+	var guard_prepare_other_cancel := 0
+	var completed_prepare_duration_valid := true
+	var command_prepare_outcome: StringName = &""
+	for observation: Dictionary in formation_stats.get("preparing_b_observations", []):
+		if StringName(observation.get("monster_type", &"")) != &"formation_guard":
+			continue
+		guard_prepare_observations.append(observation.duplicate(true))
+		var outcome := StringName(observation.get("outcome", &""))
+		if outcome == &"COMPLETED":
+			guard_prepare_completed += 1
+			completed_prepare_duration_valid = completed_prepare_duration_valid and (
+				float(observation.get("actual_duration", 0.0)) + 0.001
+					>= float(observation.get("configured_duration", INF))
+			)
+		elif outcome == CONFIG.INTERRUPTION_MEMBER_DIED:
+			guard_prepare_member_loss += 1
+		else:
+			guard_prepare_other_cancel += 1
+		if StringName(observation.get("formation_id", &"")) == command_group_id:
+			command_prepare_outcome = outcome
 	var trace := sanitize_trace(Dictionary(battle.get("wave", {})).get("spawn_trace", []))
 	var leaked_by_profile: Dictionary = {}
 	for enemy_id in controller.settled_enemy_ids.keys():
@@ -517,6 +630,20 @@ func run_validation_battle(mode: StringName) -> Dictionary:
 		"completed_b": int(formation_stats.get("completed_b_count", 0)),
 		"interrupted": int(formation_stats.get("interrupted_count", 0)),
 		"downgraded": int(formation_stats.get("downgrade_count", 0)),
+		"prepare_started": int(formation_stats.get("preparing_b_started_count", 0)),
+		"prepare_completed": int(formation_stats.get("preparing_b_completed_count", 0)),
+		"prepare_member_loss": int(formation_stats.get("preparing_b_member_loss_count", 0)),
+		"prepare_other_cancel": int(formation_stats.get("preparing_b_other_cancel_count", 0)),
+		"prepare_observations": Array(formation_stats.get("preparing_b_observations", [])).duplicate(true),
+		"guard_prepare_started": guard_prepare_starts.size(),
+		"guard_prepare_completed": guard_prepare_completed,
+		"guard_prepare_member_loss": guard_prepare_member_loss,
+		"guard_prepare_other_cancel": guard_prepare_other_cancel,
+		"guard_prepare_observations": guard_prepare_observations,
+		"guard_prepare_starts": guard_prepare_starts,
+		"guard_prepare_state_sequences": guard_prepare_state_sequences,
+		"completed_prepare_duration_valid": completed_prepare_duration_valid,
+		"saw_preparing_forward_progress": saw_preparing_forward_progress,
 		"guard_damage_prevented": int(prevented_by_profile.get(&"formation_guard", 0)),
 		"leaked_by_profile": leaked_by_profile,
 		"first_kill_delay": first_kill_delay,
@@ -529,12 +656,16 @@ func run_validation_battle(mode: StringName) -> Dictionary:
 		"direct_damage_calls": 0,
 		"trace": trace,
 		"saw_approach_zero": saw_approach_zero,
+		"saw_preparing_zero": saw_preparing_zero,
 		"saw_a_effect": saw_a_effect,
 		"saw_b_effect": saw_b_effect,
 		"visual_sync_valid": visual_sync_valid,
 		"saw_guard_b_warning": saw_guard_b_warning,
 		"warning_state_valid": warning_state_valid,
-		"saw_warning_clear_on_complete": saw_warning_clear_on_complete,
+		"saw_guard_b_preparing_visual": saw_guard_b_preparing_visual,
+		"preparing_visual_state_valid": preparing_visual_state_valid,
+		"ordinary_preparing_visual_absent": ordinary_preparing_visual_absent,
+		"saw_preparing_clear_on_complete": saw_preparing_clear_on_complete,
 		"command_debug_valid": command_debug_valid,
 		"command_did_not_mutate_formation": command_did_not_mutate_formation,
 		"target_kept_b_until_first_member_death": target_kept_b_until_first_member_death,
@@ -544,6 +675,19 @@ func run_validation_battle(mode: StringName) -> Dictionary:
 		"command_state": String(command_state),
 		"command_level": String(command_level),
 		"command_reduction": command_reduction,
+		"command_prepare_started_at": command_prepare_started_at,
+		"command_prepare_remaining": command_prepare_remaining,
+		"command_reaction_delay": (
+			first_intervention_at - command_prepare_started_at
+			if command_prepare_started_at >= 0.0 and first_intervention_at >= 0.0
+			else -1.0
+		),
+		"command_prepare_outcome": String(command_prepare_outcome),
+		"first_kill_prepare_remaining": (
+			maxf(0.0, command_prepare_remaining - (first_kill_absolute - first_intervention_at))
+			if command_prepare_started_at >= 0.0 and not is_inf(first_kill_absolute)
+			else -1.0
+		),
 		"b_attempt_count": b_attempt_started_at.size(),
 		"b_completed_count": b_completed_ids.size(),
 		"b_prevented_count": b_attempt_started_at.size() - b_completed_ids.size(),
@@ -566,6 +710,10 @@ func run_validation_battle(mode: StringName) -> Dictionary:
 		and int(reset_stats.get("member_assignment_count", -1)) == 0
 		and int(reset_stats.get("completed_a_count", -1)) == 0
 		and int(reset_stats.get("completed_b_count", -1)) == 0
+		and int(reset_stats.get("preparing_b_count", -1)) == 0
+		and int(reset_stats.get("preparing_b_started_count", -1)) == 0
+		and int(reset_stats.get("preparing_b_completed_count", -1)) == 0
+		and Array(reset_stats.get("preparing_b_observations", [])).is_empty()
 		and Dictionary(reset.get("formation_damage_prevented_by_profile", {})).is_empty()
 		and Dictionary(reset.get("command", {})).is_empty()
 		and Array(reset.get("attack_visuals", [])).is_empty()
@@ -575,9 +723,9 @@ func run_validation_battle(mode: StringName) -> Dictionary:
 	return result
 
 
-func find_guard_b_for_mode(controller, mode: StringName) -> Dictionary:
+func find_guard_b_for_mode(controller, mode: StringName, battle_elapsed: float) -> Dictionary:
 	var expected_state := (
-		CONFIG.FORMATION_STATE_FORMING_B
+		CONFIG.FORMATION_STATE_PREPARING_B
 		if mode == MODE_PRE_FORMATION_INTERCEPT
 		else CONFIG.FORMATION_STATE_COMPLETE
 	)
@@ -587,6 +735,11 @@ func find_guard_b_for_mode(controller, mode: StringName) -> Dictionary:
 			and StringName(group.get("formation_level", &"")) == &"B"
 			and StringName(group.get("formation_state", &"")) == expected_state
 		):
+			if mode == MODE_PRE_FORMATION_INTERCEPT and (
+				battle_elapsed - float(group.get("prepare_started_runtime_elapsed", battle_elapsed))
+					+ 0.0001 < PREPARE_REACTION_DELAY
+			):
+				continue
 			return group
 	return {}
 
@@ -720,6 +873,20 @@ func sanitize_trace(raw_trace: Array) -> Array[Dictionary]:
 	return result
 
 
+func has_full_b_state_chain(state_sequences: Dictionary) -> bool:
+	for sequence: Array in state_sequences.values():
+		var forming_index := sequence.find(CONFIG.FORMATION_STATE_FORMING_B)
+		var preparing_index := sequence.find(CONFIG.FORMATION_STATE_PREPARING_B)
+		var complete_index := sequence.find(CONFIG.FORMATION_STATE_COMPLETE)
+		if (
+			forming_index >= 0
+			and preparing_index > forming_index
+			and complete_index > preparing_index
+		):
+			return true
+	return false
+
+
 func print_result(label: String, result: Dictionary) -> void:
 	print("v2-6a %s: state=%s duration=%.1f killed=%d leaked=%d %s durability=%d A/B/I/D=%d/%d/%d/%d prevented_damage=%d B_attempt/complete/prevented=%d/%d/%d B_seconds=%.1f command_at=%.1f state=%s level=%s reduction=%.0f%% first_kill=%.2f absolute=%.2f clear=%.2f commands=%d ordinary_progress_cost=%.3f first_wave=%d target=%s group=%s seq=%d hp=%d" % [
 		label, result.state, result.duration, result.killed, result.leaked,
@@ -734,6 +901,21 @@ func print_result(label: String, result: Dictionary) -> void:
 		result.first_target_sequence, result.first_target_health,
 	])
 	print("v2-6a %s B approach durations=%s" % [label, str(result.b_approach_durations)])
+	print("v2-6a %s prepare start/complete/member/other=%d/%d/%d/%d observations=%s" % [
+		label, result.prepare_started, result.prepare_completed,
+		result.prepare_member_loss, result.prepare_other_cancel,
+		str(result.prepare_observations),
+	])
+	print("v2-6a %s guard prepare start/complete/member/other=%d/%d/%d/%d starts=%s outcomes=%s" % [
+		label, result.guard_prepare_started, result.guard_prepare_completed,
+		result.guard_prepare_member_loss, result.guard_prepare_other_cancel,
+		str(result.guard_prepare_starts), str(result.guard_prepare_observations),
+	])
+	print("v2-6a %s command prepare start=%.1f remaining=%.1f reaction=%.1f first-kill-remaining=%.1f outcome=%s" % [
+		label, result.command_prepare_started_at, result.command_prepare_remaining,
+		result.command_reaction_delay, result.first_kill_prepare_remaining,
+		result.command_prepare_outcome,
+	])
 
 
 func print_differences(label: String, first: Dictionary, second: Dictionary) -> void:

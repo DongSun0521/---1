@@ -226,7 +226,7 @@ func is_selectable_enemy(enemy) -> bool:
 func get_effective_complete_level(enemy) -> int:
 	if not is_instance_valid(enemy):
 		return 0
-	if StringName(enemy.formation_state) in [&"FORMING_B", &"FORMING_B_LOCKED"]:
+	if StringName(enemy.formation_state) in [&"FORMING_B", &"FORMING_B_LOCKED", &"PREPARING_B"]:
 		return 1
 	if StringName(enemy.formation_state) != &"COMPLETE":
 		return 0
@@ -239,7 +239,10 @@ func get_effective_complete_level(enemy) -> int:
 
 func get_context_for(enemy) -> StringName:
 	var state := StringName(enemy.formation_state)
-	if state in [&"FORMING_A", &"FORMING_A_LOCKED", &"FORMING_B", &"FORMING_B_LOCKED"]:
+	if state in [
+		&"FORMING_A", &"FORMING_A_LOCKED", &"FORMING_B", &"FORMING_B_LOCKED",
+		&"PREPARING_B",
+	]:
 		return CONTEXT_PREVENT_FORMATION
 	var level := get_effective_complete_level(enemy)
 	if level >= 2:

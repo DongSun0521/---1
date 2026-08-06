@@ -19,6 +19,7 @@ var b_pair_neighbor_route_span := PrototypeConfig.B_PAIR_NEIGHBOR_ROUTE_SPAN
 var formation_approach_speed := PrototypeConfig.FORMATION_SLOT_MOVE_SPEED
 var formation_completion_tolerance := PrototypeConfig.FORMATION_SLOT_TOLERANCE
 var formation_duration_multiplier := 1.0
+var b_formation_prepare_duration := PrototypeConfig.DEFAULT_B_FORMATION_PREPARE_DURATION
 
 var completed_a_count := 0
 var completed_b_count := 0
@@ -37,6 +38,11 @@ var completed_a_route_spans: Dictionary = {}
 var completed_a_pair_modes: Dictionary = {}
 var completed_a_observations: Array[Dictionary] = []
 var completed_b_observations: Array[Dictionary] = []
+var preparing_b_started_count := 0
+var preparing_b_completed_count := 0
+var preparing_b_member_loss_count := 0
+var preparing_b_other_cancel_count := 0
+var preparing_b_observations: Array[Dictionary] = []
 var logic_to_visual_scale := Vector2.ONE
 var visual_scale := 1.0
 
@@ -90,6 +96,11 @@ func reset_runtime(enabled: bool, new_run_sequence := 0) -> void:
 	completed_a_pair_modes.clear()
 	completed_a_observations.clear()
 	completed_b_observations.clear()
+	preparing_b_started_count = 0
+	preparing_b_completed_count = 0
+	preparing_b_member_loss_count = 0
+	preparing_b_other_cancel_count = 0
+	preparing_b_observations.clear()
 	queue_redraw()
 
 
@@ -101,11 +112,13 @@ func set_neighbor_route_spans(a_span: int, b_span: int) -> void:
 func set_runtime_formation_tuning(
 	approach_speed: float,
 	completion_tolerance: float,
-	duration_multiplier: float
+	duration_multiplier: float,
+	prepare_duration: float = PrototypeConfig.DEFAULT_B_FORMATION_PREPARE_DURATION
 ) -> void:
 	formation_approach_speed = maxf(1.0, approach_speed)
 	formation_completion_tolerance = maxf(1.0, completion_tolerance)
 	formation_duration_multiplier = maxf(0.0, duration_multiplier)
+	b_formation_prepare_duration = maxf(0.0, prepare_duration)
 
 
 func update_formations(delta: float, active_enemies: Dictionary) -> void:
@@ -128,6 +141,8 @@ func update_formations(delta: float, active_enemies: Dictionary) -> void:
 			update_forming_a(group, safe_delta, active_enemies)
 		elif group.formation_state == PrototypeConfig.FORMATION_STATE_FORMING_B:
 			update_forming_b(group, safe_delta, active_enemies)
+		elif group.formation_state == PrototypeConfig.FORMATION_STATE_PREPARING_B:
+			update_preparing_b(group, safe_delta, active_enemies)
 		elif group.formation_state == PrototypeConfig.FORMATION_STATE_COMPLETE:
 			maintain_complete_group_slots(group, safe_delta, active_enemies)
 	start_b_candidates(active_enemies)
@@ -179,10 +194,60 @@ func update_forming_b(group, delta: float, active_enemies: Dictionary) -> void:
 		true
 	)
 	if group.advance_progress(delta, position_progress):
-		complete_b_group(group, active_enemies)
+		if b_formation_prepare_duration > 0.0:
+			begin_preparing_b(group, active_enemies)
+		else:
+			complete_b_group(group, active_enemies)
 	elif group.has_timed_out():
 		meet_timeout_count += 1
 		cancel_forming_b(group, active_enemies, true)
+
+
+func begin_preparing_b(group, active_enemies: Dictionary) -> void:
+	if group.formation_state == PrototypeConfig.FORMATION_STATE_PREPARING_B:
+		return
+	group.begin_b_preparation(b_formation_prepare_duration, runtime_elapsed)
+	preparing_b_started_count += 1
+	sync_group_to_members(group, active_enemies)
+
+
+func update_preparing_b(group, delta: float, active_enemies: Dictionary) -> void:
+	if not is_group_membership_valid(group, active_enemies, 4):
+		cancel_forming_b(group, active_enemies, true, &"", &"PAIR_INVALID")
+		return
+	if group.source_a_member_sets.size() != 2:
+		cancel_forming_b(group, active_enemies, true, &"", &"PAIR_INVALID")
+		return
+	var position_progress := apply_group_steering(
+		group,
+		delta,
+		active_enemies,
+		false
+	)
+	if group.advance_b_preparation(delta, position_progress >= 1.0):
+		record_preparation_outcome(group, &"COMPLETED", &"")
+		preparing_b_completed_count += 1
+		complete_b_group(group, active_enemies)
+
+
+func record_preparation_outcome(
+	group,
+	outcome: StringName,
+	member_id: StringName
+) -> void:
+	preparing_b_observations.append({
+		"formation_id": StringName(group.formation_id),
+		"monster_type": StringName(group.monster_type),
+		"started_at": float(group.prepare_started_runtime_elapsed),
+		"ended_at": runtime_elapsed,
+		"actual_duration": maxf(
+			0.0,
+			runtime_elapsed - float(group.prepare_started_runtime_elapsed)
+		),
+		"configured_duration": float(group.prepare_duration),
+		"outcome": outcome,
+		"member_id": member_id,
+	})
 
 
 func start_a_candidates(active_enemies: Dictionary) -> void:
@@ -621,8 +686,11 @@ func handle_member_removed(
 			removed_enemy.reset_formation_state()
 		return
 	var group = groups[group_id]
-	if group.formation_state == PrototypeConfig.FORMATION_STATE_FORMING_B:
-		cancel_forming_b(group, active_enemies, true, member_id)
+	if group.formation_state in [
+		PrototypeConfig.FORMATION_STATE_FORMING_B,
+		PrototypeConfig.FORMATION_STATE_PREPARING_B,
+	]:
+		cancel_forming_b(group, active_enemies, true, member_id, reason)
 		return
 	if (
 		group.formation_level == PrototypeConfig.FORMATION_LEVEL_B
@@ -662,7 +730,10 @@ func interrupt_member(
 		queue_redraw()
 		return {"resisted": true, "interrupted": false}
 	interrupted_count += 1
-	if group.formation_state == PrototypeConfig.FORMATION_STATE_FORMING_B:
+	if group.formation_state in [
+		PrototypeConfig.FORMATION_STATE_FORMING_B,
+		PrototypeConfig.FORMATION_STATE_PREPARING_B,
+	]:
 		cancel_forming_b(group, active_enemies, false)
 	elif (
 		group.formation_level == PrototypeConfig.FORMATION_LEVEL_B
@@ -725,10 +796,23 @@ func cancel_forming_b(
 	group,
 	active_enemies: Dictionary,
 	count_interruption: bool,
-	excluded_member_id: StringName = &""
+	excluded_member_id: StringName = &"",
+	cancel_reason: StringName = &"CANCELED"
 ) -> void:
+	var was_preparing: bool = (
+		group.formation_state == PrototypeConfig.FORMATION_STATE_PREPARING_B
+	)
 	if count_interruption:
 		interrupted_count += 1
+	if was_preparing:
+		if cancel_reason in [
+			PrototypeConfig.INTERRUPTION_MEMBER_DIED,
+			PrototypeConfig.INTERRUPTION_MEMBER_LEAKED,
+		]:
+			preparing_b_member_loss_count += 1
+		else:
+			preparing_b_other_cancel_count += 1
+		record_preparation_outcome(group, cancel_reason, excluded_member_id)
 	var source_ids: Array[StringName] = group.source_a_ids.duplicate()
 	var source_sets: Array = group.source_a_member_sets.duplicate(true)
 	var source_anchor_indices: Array[int] = (
@@ -833,7 +917,10 @@ func sync_group_to_members(group, active_enemies: Dictionary) -> void:
 	if group.formation_state == PrototypeConfig.FORMATION_STATE_FORMING_A:
 		effective_level = PrototypeConfig.FORMATION_LEVEL_SINGLE
 		effect = {}
-	elif group.formation_state == PrototypeConfig.FORMATION_STATE_FORMING_B:
+	elif group.formation_state in [
+		PrototypeConfig.FORMATION_STATE_FORMING_B,
+		PrototypeConfig.FORMATION_STATE_PREPARING_B,
+	]:
 		effective_level = PrototypeConfig.FORMATION_LEVEL_A
 		effect = (
 			PrototypeConfig.get_formation_effect(
@@ -1264,6 +1351,14 @@ func get_groups_snapshot() -> Array:
 					)
 				)
 			)
+			snapshot["preparing_b_visual_visible"] = (
+				group.formation_state == PrototypeConfig.FORMATION_STATE_PREPARING_B
+				and bool(
+					PrototypeConfig.get_monster_definition(group.monster_type).get(
+						"forming_b_warning_visual", false
+					)
+				)
+			)
 			snapshots.append(snapshot)
 	return snapshots
 
@@ -1301,6 +1396,7 @@ func get_stats_snapshot(active_enemies: Dictionary) -> Dictionary:
 	var forming_a_count := 0
 	var a_count := 0
 	var forming_b_count := 0
+	var preparing_b_count := 0
 	var b_count := 0
 	var active_zone_counts: Dictionary = {}
 	for enemy in active_enemies.values():
@@ -1316,6 +1412,8 @@ func get_stats_snapshot(active_enemies: Dictionary) -> Dictionary:
 			forming_a_count += 1
 		elif group.formation_state == PrototypeConfig.FORMATION_STATE_FORMING_B:
 			forming_b_count += 1
+		elif group.formation_state == PrototypeConfig.FORMATION_STATE_PREPARING_B:
+			preparing_b_count += 1
 		elif group.formation_level == PrototypeConfig.FORMATION_LEVEL_A:
 			a_count += 1
 		elif group.formation_level == PrototypeConfig.FORMATION_LEVEL_B:
@@ -1326,6 +1424,7 @@ func get_stats_snapshot(active_enemies: Dictionary) -> Dictionary:
 		"forming_a_count": forming_a_count,
 		"a_count": a_count,
 		"forming_b_count": forming_b_count,
+		"preparing_b_count": preparing_b_count,
 		"b_count": b_count,
 		"completed_a_count": completed_a_count,
 		"completed_b_count": completed_b_count,
@@ -1346,12 +1445,18 @@ func get_stats_snapshot(active_enemies: Dictionary) -> Dictionary:
 		"completed_a_pair_modes": completed_a_pair_modes.duplicate(true),
 		"completed_a_observations": completed_a_observations.duplicate(true),
 		"completed_b_observations": completed_b_observations.duplicate(true),
+		"preparing_b_started_count": preparing_b_started_count,
+		"preparing_b_completed_count": preparing_b_completed_count,
+		"preparing_b_member_loss_count": preparing_b_member_loss_count,
+		"preparing_b_other_cancel_count": preparing_b_other_cancel_count,
+		"preparing_b_observations": preparing_b_observations.duplicate(true),
 		"active_zone_counts": active_zone_counts,
 		"runtime_elapsed": runtime_elapsed,
 		"active_group_count": groups.size(),
 		"member_assignment_count": member_to_group.size(),
 		"formation_approach_speed": formation_approach_speed,
 		"formation_completion_tolerance": formation_completion_tolerance,
+		"b_formation_prepare_duration": b_formation_prepare_duration,
 	}
 
 
@@ -1406,6 +1511,29 @@ func draw_formation_group(group) -> void:
 			("B阵靠拢预警 %d%%" if show_warning else "阵组靠拢 %d%%") \
 				% int(round(group.formation_progress * 100.0)),
 			Color(color, 0.72)
+		)
+	elif group.formation_state == PrototypeConfig.FORMATION_STATE_PREPARING_B:
+		var pulse := 0.5 + 0.5 * sin(runtime_elapsed * 7.0)
+		var prepare_color := Color(0.58, 0.79, 0.96, 0.72 + pulse * 0.18)
+		for index in range(1, positions.size()):
+			draw_dashed_line(
+				positions[index - 1], positions[index], prepare_color,
+				2.0 + pulse * 0.8, 7.0, true
+			)
+		draw_arc(
+			center,
+			34.0 + pulse * 4.0,
+			0.0,
+			TAU,
+			32,
+			Color(prepare_color, 0.55),
+			1.5,
+			true
+		)
+		draw_formation_label(
+			center,
+			"B阵准备 %.1fs" % group.get_prepare_remaining(),
+			prepare_color
 		)
 	elif group.formation_level == PrototypeConfig.FORMATION_LEVEL_A:
 		draw_line(positions[0], positions[1], color, 3.0, true)

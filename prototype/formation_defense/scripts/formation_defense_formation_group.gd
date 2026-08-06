@@ -20,6 +20,9 @@ var formation_anchor_route_index := -1
 var initial_slot_error := 0.0
 var lock_runtime_elapsed := 0.0
 var completion_elapsed := 0.0
+var prepare_duration := 0.0
+var prepare_elapsed := 0.0
+var prepare_started_runtime_elapsed := -1.0
 var elapsed := 0.0
 var required_duration := 0.0
 var meet_timeout := 0.0
@@ -57,6 +60,9 @@ func configure(
 	completion_elapsed = 0.0
 	initial_slot_error = 0.0
 	lock_runtime_elapsed = 0.0
+	prepare_duration = 0.0
+	prepare_elapsed = 0.0
+	prepare_started_runtime_elapsed = -1.0
 	formation_anchor_route_index = -1
 	source_a_anchor_route_indices.clear()
 	formation_progress = (
@@ -143,6 +149,35 @@ func complete(new_effect: Dictionary) -> void:
 	is_locked = false
 
 
+func begin_b_preparation(duration: float, runtime_elapsed: float) -> void:
+	formation_state = &"PREPARING_B"
+	prepare_duration = maxf(0.0, duration)
+	prepare_elapsed = 0.0
+	prepare_started_runtime_elapsed = runtime_elapsed
+	time_progress = 0.0
+	position_progress = 1.0
+	formation_progress = 0.0
+	current_effect.clear()
+	is_locked = true
+
+
+func advance_b_preparation(delta: float, position_ready: bool) -> bool:
+	if not is_valid or formation_state != &"PREPARING_B":
+		return false
+	prepare_elapsed = minf(prepare_duration, prepare_elapsed + maxf(0.0, delta))
+	time_progress = (
+		clampf(prepare_elapsed / prepare_duration, 0.0, 1.0)
+		if prepare_duration > 0.0 else 1.0
+	)
+	position_progress = 1.0 if position_ready else 0.999
+	formation_progress = minf(time_progress, position_progress)
+	return time_progress >= 1.0 and position_ready
+
+
+func get_prepare_remaining() -> float:
+	return maxf(0.0, prepare_duration - prepare_elapsed)
+
+
 func show_feedback(text: String, duration: float) -> void:
 	feedback_text = text
 	feedback_remaining = maxf(0.0, duration)
@@ -168,6 +203,8 @@ func get_snapshot() -> Dictionary:
 	var display_state: StringName = &"SEARCHING"
 	if formation_state in [&"FORMING_A_LOCKED", &"FORMING_B_LOCKED"]:
 		display_state = &"APPROACHING"
+	elif formation_state == &"PREPARING_B":
+		display_state = &"PREPARING_B"
 	elif formation_state == &"COMPLETE":
 		display_state = &"FORMED_B" if formation_level == &"B" else &"FORMED_A"
 	var copied_source_members: Array = []
@@ -191,6 +228,10 @@ func get_snapshot() -> Dictionary:
 			source_a_anchor_route_indices.duplicate(),
 		"elapsed": elapsed,
 		"completion_elapsed": completion_elapsed,
+		"prepare_duration": prepare_duration,
+		"prepare_elapsed": prepare_elapsed,
+		"prepare_remaining": get_prepare_remaining(),
+		"prepare_started_runtime_elapsed": prepare_started_runtime_elapsed,
 		"required_duration": required_duration,
 		"meet_timeout": meet_timeout,
 		"time_progress": time_progress,

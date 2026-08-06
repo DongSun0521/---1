@@ -68,11 +68,13 @@ const FORMATION_LEVEL_B: StringName = &"B"
 const FORMATION_STATE_NONE: StringName = &"NONE"
 const FORMATION_STATE_FORMING_A_LOCKED: StringName = &"FORMING_A_LOCKED"
 const FORMATION_STATE_FORMING_B_LOCKED: StringName = &"FORMING_B_LOCKED"
+const FORMATION_STATE_PREPARING_B: StringName = &"PREPARING_B"
 # Compatibility aliases keep the V2-3 call sites compact while snapshots expose
 # the explicit locked states required by the second-round prototype rules.
 const FORMATION_STATE_FORMING_A := FORMATION_STATE_FORMING_A_LOCKED
 const FORMATION_STATE_FORMING_B := FORMATION_STATE_FORMING_B_LOCKED
 const FORMATION_STATE_COMPLETE: StringName = &"COMPLETE"
+const DEFAULT_B_FORMATION_PREPARE_DURATION := 0.0
 
 const INTERRUPTION_MEMBER_DIED: StringName = &"MEMBER_DIED"
 const INTERRUPTION_MEMBER_LEAKED: StringName = &"MEMBER_LEAKED"
@@ -816,6 +818,7 @@ const WAVE_BATTLES := {
 		"formation_approach_speed": 52.0,
 		"formation_completion_tolerance": 12.0,
 		"formation_duration_multiplier": 0.0,
+		"b_formation_prepare_duration": 3.0,
 		"waves": [
 			{
 				"wave_id": &"guard_1",
@@ -854,9 +857,9 @@ const WAVE_BATTLES := {
 					{
 						"start_offset": 0.0,
 						"spawn_groups": [{
-							"enemy_profile_id": &"formation_guard",
-							"count": 4,
-							"spawn_interval": 0.35,
+							"enemy_profile_id": &"charge",
+							"count": 12,
+							"spawn_interval": 1.2,
 							"allowed_spawn_points": [&"spawn_center"],
 							"allowed_lanes": [&"formation_center"],
 							"selection_mode": &"round_robin",
@@ -865,9 +868,9 @@ const WAVE_BATTLES := {
 					{
 						"start_offset": 5.0,
 						"spawn_groups": [{
-							"enemy_profile_id": &"charge",
-							"count": 12,
-							"spawn_interval": 1.2,
+							"enemy_profile_id": &"formation_guard",
+							"count": 4,
+							"spawn_interval": 0.35,
 							"allowed_spawn_points": [&"spawn_center"],
 							"allowed_lanes": [&"formation_center"],
 							"selection_mode": &"round_robin",

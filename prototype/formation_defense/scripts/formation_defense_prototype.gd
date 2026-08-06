@@ -1528,7 +1528,11 @@ func apply_formation_runtime_tuning() -> void:
 	formation_manager.set_runtime_formation_tuning(
 		float(tuning.get("formation_approach_speed", PrototypeConfig.FORMATION_SLOT_MOVE_SPEED)),
 		float(tuning.get("formation_completion_tolerance", PrototypeConfig.FORMATION_SLOT_TOLERANCE)),
-		float(tuning.get("formation_duration_multiplier", 1.0))
+		float(tuning.get("formation_duration_multiplier", 1.0)),
+		float(tuning.get(
+			"b_formation_prepare_duration",
+			PrototypeConfig.DEFAULT_B_FORMATION_PREPARE_DURATION
+		))
 	)
 
 
