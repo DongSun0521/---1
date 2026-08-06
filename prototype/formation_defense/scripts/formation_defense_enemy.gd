@@ -16,7 +16,7 @@ signal damage_resolved(
 	raw_damage: int,
 	applied_damage: int,
 	damage_source_type: StringName,
-	ranged_reduction: float
+	damage_reduction: float
 )
 
 const BODY_RADIUS := 13.0
@@ -30,6 +30,8 @@ var formation_route_index := 0
 var blocking_lane_id: StringName = &""
 var spawn_sequence := 0
 var monster_type: StringName = &"charge"
+var display_name := ""
+var type_marker: StringName = &""
 var move_speed := 0.0
 var leak_damage := 0
 var route_progress := 0.0
@@ -59,6 +61,7 @@ var formation_progress := 0.0
 var current_formation_effect: Dictionary = {}
 var formation_speed_multiplier := 1.0
 var formation_ranged_reduction := 0.0
+var formation_player_damage_reduction := 0.0
 var protection_ranged_reduction := 0.0
 var formation_can_participate := true
 var formation_zone_id: StringName = &""
@@ -71,6 +74,8 @@ var last_damage_source_type: StringName = &"UNSPECIFIED"
 var last_raw_damage := 0
 var last_applied_damage := 0
 var last_ranged_reduction := 0.0
+var last_damage_reduction := 0.0
+var last_damage_prevented := 0
 var total_damage_prevented := 0
 var command_is_target := false
 var command_is_related := false
@@ -92,7 +97,9 @@ func configure(
 	new_spawn_point_id: StringName = &"",
 	new_route_group_id: StringName = &"",
 	new_blocking_lane_id: StringName = &"",
-	new_formation_route_index: int = 0
+	new_formation_route_index: int = 0,
+	new_display_name: String = "",
+	new_type_marker: StringName = &""
 ) -> void:
 	runtime_id = new_runtime_id
 	route_id = new_route_id
@@ -105,6 +112,8 @@ func configure(
 	)
 	spawn_sequence = new_spawn_sequence
 	monster_type = new_monster_type
+	display_name = new_display_name if not new_display_name.is_empty() else String(monster_type)
+	type_marker = new_type_marker
 	move_speed = maxf(0.0, new_move_speed)
 	leak_damage = maxi(0, new_leak_damage)
 	body_color = new_body_color
@@ -125,6 +134,8 @@ func configure(
 	last_raw_damage = 0
 	last_applied_damage = 0
 	last_ranged_reduction = 0.0
+	last_damage_reduction = 0.0
+	last_damage_prevented = 0
 	total_damage_prevented = 0
 	formation_steering_offset = Vector2.ZERO
 	formation_slot_target = Vector2.ZERO
@@ -235,10 +246,7 @@ func take_damage(
 ) -> int:
 	if settlement_completed or is_dead or amount <= 0:
 		return 0
-	var reduction := (
-		get_effective_ranged_reduction()
-		if damage_source_type == &"RANGED" else 0.0
-	)
+	var reduction := get_effective_player_damage_reduction(damage_source_type)
 	var reduced_amount := maxi(
 		1,
 		roundi(float(amount) * (1.0 - clampf(reduction, 0.0, 0.95)))
@@ -249,8 +257,10 @@ func take_damage(
 	last_damage_source_type = damage_source_type
 	last_raw_damage = amount
 	last_applied_damage = applied
-	last_ranged_reduction = reduction
-	total_damage_prevented += maxi(0, amount - applied)
+	last_ranged_reduction = reduction if damage_source_type == &"RANGED" else 0.0
+	last_damage_reduction = reduction
+	last_damage_prevented = maxi(0, mini(previous_health, amount) - applied)
+	total_damage_prevented += last_damage_prevented
 	hit_flash_remaining = 0.12
 	queue_redraw()
 	damage_resolved.emit(
@@ -299,6 +309,11 @@ func apply_formation_state(
 		0.0,
 		0.95
 	)
+	formation_player_damage_reduction = clampf(
+		float(current_formation_effect.get("player_damage_reduction", 0.0)),
+		0.0,
+		0.95
+	)
 	queue_redraw()
 
 
@@ -310,6 +325,7 @@ func reset_formation_state() -> void:
 	current_formation_effect.clear()
 	formation_speed_multiplier = 1.0
 	formation_ranged_reduction = 0.0
+	formation_player_damage_reduction = 0.0
 	protection_ranged_reduction = 0.0
 	clear_formation_slot_target()
 	queue_redraw()
@@ -398,6 +414,21 @@ func get_effective_ranged_reduction() -> float:
 	return maxf(formation_ranged_reduction, protection_ranged_reduction)
 
 
+func get_effective_player_damage_reduction(damage_source_type: StringName) -> float:
+	if damage_source_type not in [&"MELEE", &"RANGED"]:
+		return 0.0
+	var reduction := formation_player_damage_reduction
+	if damage_source_type == &"RANGED":
+		reduction = maxf(reduction, get_effective_ranged_reduction())
+	return clampf(reduction, 0.0, 0.95)
+
+
+func get_formation_shield_visual_strength() -> int:
+	if formation_state != &"COMPLETE":
+		return 0
+	return maxi(0, int(current_formation_effect.get("shield_visual_strength", 0)))
+
+
 func tick_visual(delta: float) -> void:
 	if hit_flash_remaining <= 0.0:
 		return
@@ -432,6 +463,9 @@ func get_runtime_snapshot() -> Dictionary:
 		"blocking_lane_id": blocking_lane_id,
 		"spawn_sequence": spawn_sequence,
 		"monster_type": monster_type,
+		"enemy_profile_id": monster_type,
+		"display_name": display_name,
+		"type_marker": type_marker,
 		"move_speed": move_speed,
 		"effective_move_speed": get_effective_move_speed(),
 		"leak_damage": leak_damage,
@@ -452,8 +486,12 @@ func get_runtime_snapshot() -> Dictionary:
 		"current_formation_effect": current_formation_effect.duplicate(true),
 		"formation_speed_multiplier": formation_speed_multiplier,
 		"formation_ranged_reduction": formation_ranged_reduction,
+		"formation_player_damage_reduction": formation_player_damage_reduction,
 		"protection_ranged_reduction": protection_ranged_reduction,
 		"effective_ranged_reduction": get_effective_ranged_reduction(),
+		"effective_melee_reduction": get_effective_player_damage_reduction(&"MELEE"),
+		"effective_player_ranged_reduction": get_effective_player_damage_reduction(&"RANGED"),
+		"formation_shield_visual_strength": get_formation_shield_visual_strength(),
 		"formation_can_participate": formation_can_participate,
 		"formation_zone_id": formation_zone_id,
 		"formation_zone_type": formation_zone_type,
@@ -467,6 +505,8 @@ func get_runtime_snapshot() -> Dictionary:
 		"last_raw_damage": last_raw_damage,
 		"last_applied_damage": last_applied_damage,
 		"last_ranged_reduction": last_ranged_reduction,
+		"last_damage_reduction": last_damage_reduction,
+		"last_damage_prevented": last_damage_prevented,
 		"total_damage_prevented": total_damage_prevented,
 		"position": position,
 		"command_is_target": command_is_target,
@@ -476,6 +516,12 @@ func get_runtime_snapshot() -> Dictionary:
 
 
 func _draw() -> void:
+	var shield_visual_strength := get_formation_shield_visual_strength()
+	if shield_visual_strength > 0:
+		var shield_color := Color(0.48, 0.82, 1.0, 0.72)
+		draw_arc(Vector2.ZERO, BODY_RADIUS + 5.0, 0.0, TAU, 32, shield_color, 2.0, true)
+		if shield_visual_strength >= 2:
+			draw_arc(Vector2.ZERO, BODY_RADIUS + 8.0, 0.0, TAU, 32, Color(shield_color, 0.56), 2.0, true)
 	if command_is_related:
 		draw_arc(Vector2.ZERO, BODY_RADIUS + 10.0, 0.0, TAU, 32, Color(1.0, 0.68, 0.20, 0.72), 2.0, true)
 	if command_is_target:
@@ -493,7 +539,25 @@ func _draw() -> void:
 	)
 	draw_circle(Vector2.ZERO, BODY_RADIUS + 3.0, Color(0.03, 0.05, 0.08, 0.85))
 	draw_circle(Vector2.ZERO, BODY_RADIUS, visible_color)
-	if monster_type == &"charge":
+	if type_marker == &"guard_shield":
+		draw_colored_polygon(
+			PackedVector2Array([
+				Vector2(-6.0, -34.0), Vector2(6.0, -34.0),
+				Vector2(7.0, -29.0), Vector2(0.0, -23.0), Vector2(-7.0, -29.0),
+			]),
+			Color(0.72, 0.88, 1.0, 0.96)
+		)
+		draw_polyline(
+			PackedVector2Array([
+				Vector2(-6.0, -34.0), Vector2(6.0, -34.0),
+				Vector2(7.0, -29.0), Vector2(0.0, -23.0),
+				Vector2(-7.0, -29.0), Vector2(-6.0, -34.0),
+			]),
+			Color(0.18, 0.34, 0.50, 1.0),
+			1.5,
+			true
+		)
+	elif monster_type == &"charge":
 		draw_colored_polygon(
 			PackedVector2Array([
 				Vector2(-2.0, -8.0),

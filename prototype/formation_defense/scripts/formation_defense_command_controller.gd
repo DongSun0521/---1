@@ -107,10 +107,15 @@ func get_active_command_snapshot() -> Dictionary:
 		snapshot["target_health"] = int(target.current_health)
 		snapshot["target_max_health"] = int(target.max_health)
 		snapshot["monster_type"] = StringName(target.monster_type)
+		snapshot["enemy_profile_id"] = StringName(target.monster_type)
+		snapshot["display_name"] = String(target.display_name)
 		snapshot["route_id"] = StringName(target.route_id)
 		snapshot["formation_id"] = StringName(target.formation_id)
 		snapshot["formation_state"] = StringName(target.formation_state)
 		snapshot["formation_level"] = StringName(target.formation_level)
+		snapshot["formation_damage_reduction"] = float(
+			target.formation_player_damage_reduction
+		)
 	return snapshot
 
 
@@ -182,10 +187,10 @@ func complete_dismantle(level: int) -> void:
 	var reason := &"DISMANTLED_B" if level >= 2 else &"DISMANTLED_A"
 	if level >= 2:
 		stats["b_dismantled_count"] += 1
-		feedback_message = "B阵已破"
+		feedback_message = "成员击杀后B阵已破"
 	else:
 		stats["a_dismantled_count"] += 1
-		feedback_message = "A阵已拆散"
+		feedback_message = "成员击杀后A阵已破"
 	active_command["completion_reason"] = reason
 	command_feedback.emit(feedback_message)
 	clear_active_command(reason, false)
@@ -221,7 +226,7 @@ func is_selectable_enemy(enemy) -> bool:
 func get_effective_complete_level(enemy) -> int:
 	if not is_instance_valid(enemy):
 		return 0
-	if StringName(enemy.formation_state) == &"FORMING_B":
+	if StringName(enemy.formation_state) in [&"FORMING_B", &"FORMING_B_LOCKED"]:
 		return 1
 	if StringName(enemy.formation_state) != &"COMPLETE":
 		return 0
@@ -234,7 +239,7 @@ func get_effective_complete_level(enemy) -> int:
 
 func get_context_for(enemy) -> StringName:
 	var state := StringName(enemy.formation_state)
-	if state == &"FORMING_A" or state == &"FORMING_B":
+	if state in [&"FORMING_A", &"FORMING_A_LOCKED", &"FORMING_B", &"FORMING_B_LOCKED"]:
 		return CONTEXT_PREVENT_FORMATION
 	var level := get_effective_complete_level(enemy)
 	if level >= 2:
@@ -268,9 +273,9 @@ func refresh_enemy_visuals() -> void:
 func get_context_display_name(context: StringName) -> String:
 	return {
 		CONTEXT_FOCUS: "集火目标",
-		CONTEXT_PREVENT_FORMATION: "阻止组阵",
-		CONTEXT_DISMANTLE_A: "拆A阵",
-		CONTEXT_DISMANTLE_B: "拆B阵",
+		CONTEXT_PREVENT_FORMATION: "成阵前拦截",
+		CONTEXT_DISMANTLE_A: "集火A阵成员",
+		CONTEXT_DISMANTLE_B: "集火B阵成员",
 	}.get(context, "集火目标")
 
 

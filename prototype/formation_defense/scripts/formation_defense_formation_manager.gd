@@ -835,9 +835,13 @@ func sync_group_to_members(group, active_enemies: Dictionary) -> void:
 		effect = {}
 	elif group.formation_state == PrototypeConfig.FORMATION_STATE_FORMING_B:
 		effective_level = PrototypeConfig.FORMATION_LEVEL_A
-		effect = PrototypeConfig.get_formation_effect(
-			group.monster_type,
-			PrototypeConfig.FORMATION_LEVEL_A
+		effect = (
+			PrototypeConfig.get_formation_effect(
+				group.monster_type,
+				PrototypeConfig.FORMATION_LEVEL_A
+			)
+			if PrototypeConfig.retains_a_effect_while_forming_b(group.monster_type)
+			else {}
 		)
 	for member_id: StringName in group.member_ids:
 		var enemy = active_enemies.get(member_id)
@@ -1251,7 +1255,16 @@ func get_groups_snapshot() -> Array:
 	for formation_id: StringName in get_sorted_group_ids():
 		var group = groups.get(formation_id)
 		if group != null and group.is_valid:
-			snapshots.append(group.get_snapshot())
+			var snapshot: Dictionary = group.get_snapshot()
+			snapshot["forming_b_warning_visible"] = (
+				group.formation_state == PrototypeConfig.FORMATION_STATE_FORMING_B
+				and bool(
+					PrototypeConfig.get_monster_definition(group.monster_type).get(
+						"forming_b_warning_visual", false
+					)
+				)
+			)
+			snapshots.append(snapshot)
 	return snapshots
 
 
@@ -1376,9 +1389,22 @@ func draw_formation_group(group) -> void:
 			Color(color, 0.72)
 		)
 	elif group.formation_state == PrototypeConfig.FORMATION_STATE_FORMING_B:
+		var show_warning := bool(
+			PrototypeConfig.get_monster_definition(group.monster_type).get(
+				"forming_b_warning_visual", false
+			)
+		)
+		if show_warning:
+			var warning_color := Color(0.52, 0.72, 0.88, 0.68)
+			for index in range(1, positions.size()):
+				draw_dashed_line(
+					positions[index - 1], positions[index], warning_color,
+					1.5, 9.0, true
+				)
 		draw_formation_label(
 			center,
-			"阵组靠拢 %d%%" % int(round(group.formation_progress * 100.0)),
+			("B阵靠拢预警 %d%%" if show_warning else "阵组靠拢 %d%%") \
+				% int(round(group.formation_progress * 100.0)),
 			Color(color, 0.72)
 		)
 	elif group.formation_level == PrototypeConfig.FORMATION_LEVEL_A:

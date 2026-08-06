@@ -15,7 +15,7 @@ const DAMAGE_SOURCE_MELEE: StringName = &"MELEE"
 const DAMAGE_SOURCE_RANGED: StringName = &"RANGED"
 const DAMAGE_SOURCE_UNSPECIFIED: StringName = &"UNSPECIFIED"
 
-const MONSTER_TYPE_IDS: Array[StringName] = [&"charge", &"shield"]
+const MONSTER_TYPE_IDS: Array[StringName] = [&"charge", &"shield", &"formation_guard"]
 const MONSTER_DEFINITIONS := {
 	&"charge": {
 		"display_name": "冲锋怪",
@@ -34,6 +34,31 @@ const MONSTER_DEFINITIONS := {
 		"attack_damage": ENEMY_ATTACK_DAMAGE,
 		"attack_interval": ENEMY_ATTACK_INTERVAL,
 		"body_color": Color(0.34, 0.70, 0.96, 1.0),
+		"type_marker": &"plate",
+	},
+	&"formation_guard": {
+		"display_name": "护阵怪",
+		"max_health": 91,
+		"move_speed": 42.0,
+		"leak_damage": ENEMY_LEAK_DAMAGE,
+		"attack_damage": ENEMY_ATTACK_DAMAGE,
+		"attack_interval": ENEMY_ATTACK_INTERVAL,
+		"body_color": Color(0.31, 0.48, 0.66, 1.0),
+		"type_marker": &"guard_shield",
+		"forming_b_warning_visual": true,
+		"retain_a_effect_while_forming_b": false,
+		"formation_effects": {
+			FORMATION_LEVEL_A: {
+				"player_damage_reduction": 0.20,
+				"shield_visual_strength": 1,
+				"effect_text": "护阵减伤 20%",
+			},
+			FORMATION_LEVEL_B: {
+				"player_damage_reduction": 0.35,
+				"shield_visual_strength": 2,
+				"effect_text": "强化护阵减伤 35%",
+			},
+		},
 	},
 }
 
@@ -91,6 +116,7 @@ const SHIELD_B_ALLY_RANGED_REDUCTION := 0.30
 const FORMATION_COLORS := {
 	&"charge": Color(1.0, 0.55, 0.25, 1.0),
 	&"shield": Color(0.30, 0.76, 1.0, 1.0),
+	&"formation_guard": Color(0.45, 0.72, 0.94, 1.0),
 }
 
 const FORMATION_ZONE_SINGLE: StringName = &"SINGLE_WALK"
@@ -778,6 +804,79 @@ const WAVE_BATTLES := {
 			},
 		],
 	},
+	&"v2_6a_formation_guard_validation": {
+		"battle_id": &"v2_6a_formation_guard_validation",
+		"display_name": "V2-6A 护阵怪验证",
+		"random_seed": 2601,
+		"initial_countdown": 3.0,
+		"inter_wave_delay": 3.0,
+		"enemy_profile_overrides": {
+			&"charge": {"max_health": 91, "move_speed": 42.0},
+		},
+		"formation_approach_speed": 52.0,
+		"formation_completion_tolerance": 12.0,
+		"formation_duration_multiplier": 0.0,
+		"waves": [
+			{
+				"wave_id": &"guard_1",
+				"display_name": "A阵熟悉",
+				"subwaves": [{
+					"start_offset": 0.0,
+					"spawn_groups": [{
+						"enemy_profile_id": &"formation_guard",
+						"count": 2,
+						"spawn_interval": 0.8,
+						"allowed_spawn_points": [&"spawn_center"],
+						"allowed_lanes": [&"formation_center"],
+						"selection_mode": &"round_robin",
+					}],
+				}],
+			},
+			{
+				"wave_id": &"guard_2",
+				"display_name": "B阵验证",
+				"subwaves": [{
+					"start_offset": 0.0,
+					"spawn_groups": [{
+						"enemy_profile_id": &"formation_guard",
+						"count": 4,
+						"spawn_interval": 0.35,
+						"allowed_spawn_points": [&"spawn_upper", &"spawn_center"],
+						"allowed_lanes": [&"formation_upper", &"formation_center"],
+						"selection_mode": &"round_robin",
+					}],
+				}],
+			},
+			{
+				"wave_id": &"guard_3",
+				"display_name": "混合判断",
+				"subwaves": [
+					{
+						"start_offset": 0.0,
+						"spawn_groups": [{
+							"enemy_profile_id": &"formation_guard",
+							"count": 4,
+							"spawn_interval": 0.35,
+							"allowed_spawn_points": [&"spawn_center"],
+							"allowed_lanes": [&"formation_center"],
+							"selection_mode": &"round_robin",
+						}],
+					},
+					{
+						"start_offset": 5.0,
+						"spawn_groups": [{
+							"enemy_profile_id": &"charge",
+							"count": 12,
+							"spawn_interval": 1.2,
+							"allowed_spawn_points": [&"spawn_center"],
+							"allowed_lanes": [&"formation_center"],
+							"selection_mode": &"round_robin",
+						}],
+					},
+				],
+			},
+		],
+	},
 }
 
 const SCENARIO_IDS: Array[StringName] = [
@@ -788,6 +887,7 @@ const SCENARIO_IDS: Array[StringName] = [
 	&"command_demo",
 	&"wave_validation",
 	&"pacing_validation",
+	&"formation_guard_validation",
 ]
 const SCENARIOS := {
 	&"survival": {
@@ -944,8 +1044,8 @@ const SCENARIOS := {
 		],
 	},
 	&"command_demo": {
-		"display_name": "V2-4 集火/拆阵",
-		"description": "复用已锁定的V2-3生成计划，供集火、阻阵与分段拆阵交互验证。",
+		"display_name": "V2-4 集火与破阵反馈",
+		"description": "复用已锁定的V2-3生成计划，验证集火、成阵前拦截与击杀后自然破阵。",
 		"spawn_interval": 0.75,
 		"formations_enabled": true,
 		"auto_demo_control_resistance": true,
@@ -979,6 +1079,15 @@ const SCENARIOS := {
 		"active_spawn_point_ids": [
 			&"spawn_upper_outer", &"spawn_upper", &"spawn_center",
 			&"spawn_lower", &"spawn_lower_outer",
+		],
+	},
+	&"formation_guard_validation": {
+		"display_name": "V2-6A 护阵怪验证",
+		"description": "三波验证护阵减伤、成阵前拦截与成阵后集火差异。",
+		"formations_enabled": true,
+		"wave_battle_id": &"v2_6a_formation_guard_validation",
+		"active_spawn_point_ids": [
+			&"spawn_upper", &"spawn_center", &"spawn_lower", &"spawn_lower_outer",
 		],
 	},
 }
@@ -1173,6 +1282,10 @@ static func get_formation_effect(
 	monster_type: StringName,
 	formation_level: StringName
 ) -> Dictionary:
+	var definition := get_monster_definition(monster_type)
+	var configured_effects: Dictionary = definition.get("formation_effects", {})
+	if configured_effects.has(formation_level):
+		return Dictionary(configured_effects[formation_level]).duplicate(true)
 	if monster_type == &"charge":
 		if formation_level == FORMATION_LEVEL_A:
 			return {
@@ -1199,6 +1312,15 @@ static func get_formation_effect(
 				"effect_text": "远程减伤 60%｜友军保护 30%",
 			}
 	return {}
+
+
+static func retains_a_effect_while_forming_b(monster_type: StringName) -> bool:
+	return bool(
+		get_monster_definition(monster_type).get(
+			"retain_a_effect_while_forming_b",
+			true
+		)
+	)
 
 
 static func get_route_points(
@@ -1347,7 +1469,10 @@ static func get_character_definition(character_id: StringName) -> Dictionary:
 static func get_recommended_deployment(
 	scenario_id: StringName = &""
 ) -> Dictionary:
-	if scenario_id in [&"formation_demo", &"command_demo", &"wave_validation", &"pacing_validation"]:
+	if scenario_id in [
+		&"formation_demo", &"command_demo", &"wave_validation", &"pacing_validation",
+		&"formation_guard_validation",
+	]:
 		return FORMATION_DEMO_DEPLOYMENT.duplicate(true)
 	return RECOMMENDED_DEPLOYMENT.duplicate(true)
 

@@ -164,8 +164,10 @@ func assert_required_nodes(controller: Node) -> void:
 func assert_monster_and_formation_config() -> void:
 	var monster_ids := PrototypeConfig.get_monster_type_ids()
 	require(
-		monster_ids == [&"charge", &"shield"],
-		"V2-3 must expose charge and shield monster configurations"
+		monster_ids.has(&"charge")
+			and monster_ids.has(&"shield")
+			and monster_ids.has(&"formation_guard"),
+		"monster configurations must retain V2-3 types and expose formation guard"
 	)
 	for monster_type: StringName in monster_ids:
 		var definition := PrototypeConfig.get_monster_definition(monster_type)

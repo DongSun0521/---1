@@ -1,5 +1,21 @@
 # 原型数据目录
 
+## V2-6A护阵怪配置
+
+`formation_guard`继续使用现有enemy profile结构。基础字段为`display_name`、`max_health`、
+`move_speed`、`leak_damage`、攻击参数、`body_color`与`type_marker`；`formation_effects`按A/B
+保存`player_damage_reduction`、`shield_visual_strength`和`effect_text`。伤害逻辑只读取当前
+完整阵型同步下来的效果字段，不判断profile ID。未配置`player_damage_reduction`的旧敌人默认
+为0；通用减伤与旧远程减伤取最大值而不叠加，并沿用`roundi(raw * (1-reduction))`取整。
+
+`retain_a_effect_while_forming_b=false`表示护阵怪在B阵靠拢期间不保留A阵减伤；
+`forming_b_warning_visual=true`只在真实FORMING_B期间启用轻量蓝灰预警，不改变组阵行为。旧profile省略
+该字段时保持原行为。`v2_6a_formation_guard_validation`使用固定种子2601、3秒初始倒计时、
+3秒波间倒计时和2/4/16三波计划。第三波4只护阵怪从中路先行，12只普通冲锋怪在第5秒后
+以1.2秒间隔跟进。`formation_damage_prevented_by_profile`记录排除过量伤害后的真实减免量。
+玩家策略对照只能通过战场左键公开入口选择集火目标；成员死亡前不得调用内部中断、降级、
+直接伤害或状态写入。所谓“击杀后破阵”是正常攻击造成成员死亡后的结果，不是第二条玩家指令。
+
 ## V2-5C节奏方案
 
 `v2_5c_pacing`使用与V2-5B相同的battle/wave/subwave/spawn_group结构。六波计划数为
@@ -20,7 +36,7 @@
 包含唯一 `wave_id`、显示名及 `subwaves`；子波次的 `start_offset` 相对本波开始时间，内部
 `spawn_groups` 支持：
 
-- `enemy_profile_id`：现有 `charge` 或 `shield`；
+- `enemy_profile_id`：现有 `charge`、`shield` 或 `formation_guard`；
 - `max_health`：可选的本生成组生命值覆盖；省略时使用敌人配置的默认生命值；
 - `count`、`spawn_interval`：数量与同组出生间隔；
 - `allowed_spawn_points`、`allowed_lanes`：现有刷怪口和路线ID；两者为空时使用全部已知刷怪口；

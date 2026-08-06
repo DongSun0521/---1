@@ -113,6 +113,8 @@ var character_attack_event_count := 0
 var healing_event_count := 0
 var formation_damage_reduction_event_count := 0
 var formation_damage_prevented_total := 0
+var formation_damage_reduction_events_by_profile: Dictionary = {}
+var formation_damage_prevented_by_profile: Dictionary = {}
 var speed_effect_observed_ids: Dictionary = {}
 var demo_control_resistance_triggered := false
 var battle_elapsed := 0.0
@@ -666,6 +668,8 @@ func start_battle() -> bool:
 	healing_event_count = 0
 	formation_damage_reduction_event_count = 0
 	formation_damage_prevented_total = 0
+	formation_damage_reduction_events_by_profile.clear()
+	formation_damage_prevented_by_profile.clear()
 	speed_effect_observed_ids.clear()
 	demo_control_resistance_triggered = false
 	battle_elapsed = 0.0
@@ -717,6 +721,8 @@ func restart_battle() -> void:
 	healing_event_count = 0
 	formation_damage_reduction_event_count = 0
 	formation_damage_prevented_total = 0
+	formation_damage_reduction_events_by_profile.clear()
+	formation_damage_prevented_by_profile.clear()
 	speed_effect_observed_ids.clear()
 	demo_control_resistance_triggered = false
 	battle_elapsed = 0.0
@@ -948,7 +954,9 @@ func spawn_enemy_for_route(
 		spawn_point_id,
 		route_group_id,
 		blocking_lane_id,
-		formation_route_index
+		formation_route_index,
+		String(monster_definition.get("display_name", String(monster_type))),
+		StringName(monster_definition.get("type_marker", &""))
 	)
 	enemy.reached_entrance.connect(handle_enemy_arrival)
 	enemy.enemy_died.connect(handle_enemy_death)
@@ -1110,20 +1118,23 @@ func handle_enemy_damage_resolved(
 	raw_damage: int,
 	applied_damage: int,
 	damage_source_type: StringName,
-	ranged_reduction: float
+	damage_reduction: float
 ) -> void:
 	if not active_enemies.has(enemy_id):
 		return
-	if (
-		damage_source_type == PrototypeConfig.DAMAGE_SOURCE_RANGED
-		and ranged_reduction > 0.0
-		and applied_damage > 0
-	):
+	if damage_reduction > 0.0 and applied_damage > 0:
 		formation_damage_reduction_event_count += 1
-		formation_damage_prevented_total += maxi(
-			0,
-			raw_damage - applied_damage
-		)
+		var enemy = active_enemies.get(enemy_id)
+		if is_instance_valid(enemy):
+			var prevented := maxi(0, int(enemy.last_damage_prevented))
+			formation_damage_prevented_total += prevented
+			var profile_id := StringName(enemy.monster_type)
+			formation_damage_reduction_events_by_profile[profile_id] = int(
+				formation_damage_reduction_events_by_profile.get(profile_id, 0)
+			) + 1
+			formation_damage_prevented_by_profile[profile_id] = int(
+				formation_damage_prevented_by_profile.get(profile_id, 0)
+			) + prevented
 
 
 func handle_enemy_attack(
@@ -1600,6 +1611,10 @@ func get_battle_snapshot() -> Dictionary:
 		"formation_damage_reduction_event_count":
 			formation_damage_reduction_event_count,
 		"formation_damage_prevented_total": formation_damage_prevented_total,
+		"formation_damage_reduction_events_by_profile":
+			formation_damage_reduction_events_by_profile.duplicate(true),
+		"formation_damage_prevented_by_profile":
+			formation_damage_prevented_by_profile.duplicate(true),
 		"speed_effect_observed_count": speed_effect_observed_ids.size(),
 		"speed_effect_observed_ids": speed_effect_observed_ids.duplicate(true),
 		"demo_control_resistance_triggered":
@@ -1761,18 +1776,36 @@ func update_ui() -> void:
 			StringName(command.get("context", &"FOCUS"))
 		)
 		var waiting := "｜等待进入射程" if is_command_target_waiting_for_range() else ""
-		command_status_label.text = "%s｜%s(%s)｜HP %d/%d｜阵型 %s/%s｜路线 %s%s" % [
+		command_status_label.text = "%s｜%s｜ID %s｜%s｜HP %d/%d｜阵型 %s/%s｜减伤 %d%%｜阵型ID %s｜路线 %s%s" % [
 			context_name,
 			String(command.get("target_runtime_id", &"")),
-			String(command.get("monster_type", &"")),
+			String(command.get("enemy_profile_id", command.get("monster_type", &""))),
+			String(command.get("display_name", "")),
 			int(command.get("target_health", 0)),
 			int(command.get("target_max_health", 0)),
 			String(command.get("formation_level", &"SINGLE")),
 			String(command.get("formation_state", &"NONE")),
+			int(round(float(command.get("formation_damage_reduction", 0.0)) * 100.0)),
+			String(command.get("formation_id", &"")),
 			String(command.get("route_id", &"")),
 			waiting,
 		]
-	compact_command_label.text = command_status_label.text
+	if command.is_empty():
+		compact_command_label.text = command_status_label.text
+	else:
+		var compact_waiting := "｜等待进入射程" if is_command_target_waiting_for_range() else ""
+		compact_command_label.text = "%s｜%s｜HP %d/%d｜阵型 %s/%s｜减伤 %d%%%s" % [
+			command_controller.get_context_display_name(
+				StringName(command.get("context", &"FOCUS"))
+			),
+			String(command.get("target_runtime_id", &"")),
+			int(command.get("target_health", 0)),
+			int(command.get("target_max_health", 0)),
+			String(command.get("formation_level", &"SINGLE")),
+			String(command.get("formation_state", &"NONE")),
+			int(round(float(command.get("formation_damage_reduction", 0.0)) * 100.0)),
+			compact_waiting,
+		]
 	start_button.disabled = battle_state != BattleState.READY
 	scenario_option.disabled = battle_state != BattleState.READY
 	refresh_deployment_visuals()
