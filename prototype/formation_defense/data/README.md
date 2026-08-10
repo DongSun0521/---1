@@ -1,5 +1,18 @@
 # 原型数据目录
 
+## V2-6B-R突袭怪配置
+
+`rush_raider`沿用现有enemy profile结构，并以`formation_can_participate=false`明确排除在A/B阵
+候选之外。突袭字段为`rush_enabled`、`rush_trigger_progress`、`rush_prepare_duration`、
+`rush_duration`、`rush_speed_multiplier`和`rush_once`；旧profile省略这些字段时完全保持普通移动。
+
+当前独立验证值为91生命、42普通移速、路线进度0.48触发、1.25秒准备、3.25秒冲刺、4.0倍
+冲刺移速和单次消耗。准备期仍按普通速度移动，准备和冲刺均正常承受玩家伤害，漏怪伤害保持1；
+配置不包含减伤、无敌、恢复或额外生命。`v2_6b_rush_raider_validation`使用固定种子2602和
+1/2/5三波计划，只生成突袭怪，不包含护阵怪或混合目标优先级验证。标准参考阵型为战士
+`middle_c1`、游侠`top_c1`、法师`bottom_c1`、医生`middle_c2`；角色全部前置时可能在突袭触发前
+自然击杀目标，属于正常布阵收益而非验证失败。
+
 ## V2-6A护阵怪配置
 
 `formation_guard`继续使用现有enemy profile结构。基础字段为`display_name`、`max_health`、
@@ -36,7 +49,7 @@
 包含唯一 `wave_id`、显示名及 `subwaves`；子波次的 `start_offset` 相对本波开始时间，内部
 `spawn_groups` 支持：
 
-- `enemy_profile_id`：现有 `charge`、`shield` 或 `formation_guard`；
+- `enemy_profile_id`：现有 `charge`、`shield`、`formation_guard` 或 `rush_raider`；
 - `max_health`：可选的本生成组生命值覆盖；省略时使用敌人配置的默认生命值；
 - `count`、`spawn_interval`：数量与同组出生间隔；
 - `allowed_spawn_points`、`allowed_lanes`：现有刷怪口和路线ID；两者为空时使用全部已知刷怪口；

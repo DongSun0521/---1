@@ -15,7 +15,9 @@ const DAMAGE_SOURCE_MELEE: StringName = &"MELEE"
 const DAMAGE_SOURCE_RANGED: StringName = &"RANGED"
 const DAMAGE_SOURCE_UNSPECIFIED: StringName = &"UNSPECIFIED"
 
-const MONSTER_TYPE_IDS: Array[StringName] = [&"charge", &"shield", &"formation_guard"]
+const MONSTER_TYPE_IDS: Array[StringName] = [
+	&"charge", &"shield", &"formation_guard", &"rush_raider",
+]
 const MONSTER_DEFINITIONS := {
 	&"charge": {
 		"display_name": "冲锋怪",
@@ -60,7 +62,28 @@ const MONSTER_DEFINITIONS := {
 			},
 		},
 	},
+	&"rush_raider": {
+		"display_name": "突袭怪",
+		"max_health": 91,
+		"move_speed": 42.0,
+		"leak_damage": ENEMY_LEAK_DAMAGE,
+		"attack_damage": ENEMY_ATTACK_DAMAGE,
+		"attack_interval": ENEMY_ATTACK_INTERVAL,
+		"body_color": Color(0.88, 0.30, 0.20, 1.0),
+		"type_marker": &"rush_raider",
+		"formation_can_participate": false,
+		"rush_enabled": true,
+		"rush_trigger_progress": 0.48,
+		"rush_prepare_duration": 1.25,
+		"rush_duration": 3.25,
+		"rush_speed_multiplier": 4.00,
+		"rush_once": true,
+	},
 }
+
+const RUSH_STATE_APPROACH: StringName = &"APPROACH"
+const RUSH_STATE_PREPARING: StringName = &"PREPARING_RUSH"
+const RUSH_STATE_RUSHING: StringName = &"RUSHING"
 
 const FORMATION_LEVEL_SINGLE: StringName = &"SINGLE"
 const FORMATION_LEVEL_A: StringName = &"A"
@@ -880,6 +903,71 @@ const WAVE_BATTLES := {
 			},
 		],
 	},
+	&"v2_6b_rush_raider_validation": {
+		"battle_id": &"v2_6b_rush_raider_validation",
+		"display_name": "V2-6B-R 突袭怪验证",
+		"random_seed": 2602,
+		"initial_countdown": 3.0,
+		"inter_wave_delay": 3.0,
+		"waves": [
+			{
+				"wave_id": &"rush_1",
+				"display_name": "单体预警",
+				"subwaves": [{
+					"start_offset": 0.0,
+					"spawn_groups": [{
+						"enemy_profile_id": &"rush_raider",
+						"count": 1,
+						"spawn_interval": 0.0,
+						"allowed_spawn_points": [&"spawn_center"],
+						"allowed_lanes": [&"formation_center"],
+						"selection_mode": &"round_robin",
+					}],
+				}],
+			},
+			{
+				"wave_id": &"rush_2",
+				"display_name": "错峰突袭",
+				"subwaves": [{
+					"start_offset": 0.0,
+					"spawn_groups": [{
+						"enemy_profile_id": &"rush_raider",
+						"count": 2,
+						"spawn_interval": 2.0,
+						"allowed_spawn_points": [
+							&"spawn_upper_outer", &"spawn_lower_outer",
+						],
+						"allowed_lanes": [
+							&"formation_upper_outer", &"formation_lower_outer",
+						],
+						"selection_mode": &"round_robin",
+					}],
+				}],
+			},
+			{
+				"wave_id": &"rush_3",
+				"display_name": "多路突破",
+				"subwaves": [{
+					"start_offset": 0.0,
+					"spawn_groups": [{
+						"enemy_profile_id": &"rush_raider",
+						"count": 5,
+						"spawn_interval": 0.9,
+						"allowed_spawn_points": [
+							&"spawn_upper_outer", &"spawn_upper", &"spawn_center",
+							&"spawn_lower", &"spawn_lower_outer",
+						],
+						"allowed_lanes": [
+							&"formation_upper_outer", &"formation_upper",
+							&"formation_center", &"formation_lower",
+							&"formation_lower_outer",
+						],
+						"selection_mode": &"round_robin",
+					}],
+				}],
+			},
+		],
+	},
 }
 
 const SCENARIO_IDS: Array[StringName] = [
@@ -891,6 +979,7 @@ const SCENARIO_IDS: Array[StringName] = [
 	&"wave_validation",
 	&"pacing_validation",
 	&"formation_guard_validation",
+	&"rush_raider_validation",
 ]
 const SCENARIOS := {
 	&"survival": {
@@ -1091,6 +1180,16 @@ const SCENARIOS := {
 		"wave_battle_id": &"v2_6a_formation_guard_validation",
 		"active_spawn_point_ids": [
 			&"spawn_upper", &"spawn_center", &"spawn_lower", &"spawn_lower_outer",
+		],
+	},
+	&"rush_raider_validation": {
+		"display_name": "V2-6B-R 突袭怪验证",
+		"description": "三波验证突袭预警、爆发推进与真实集火拦截。",
+		"formations_enabled": true,
+		"wave_battle_id": &"v2_6b_rush_raider_validation",
+		"active_spawn_point_ids": [
+			&"spawn_upper_outer", &"spawn_upper", &"spawn_center",
+			&"spawn_lower", &"spawn_lower_outer",
 		],
 	},
 }
@@ -1475,6 +1574,7 @@ static func get_recommended_deployment(
 	if scenario_id in [
 		&"formation_demo", &"command_demo", &"wave_validation", &"pacing_validation",
 		&"formation_guard_validation",
+		&"rush_raider_validation",
 	]:
 		return FORMATION_DEMO_DEPLOYMENT.duplicate(true)
 	return RECOMMENDED_DEPLOYMENT.duplicate(true)

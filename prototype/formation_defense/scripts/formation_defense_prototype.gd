@@ -956,7 +956,9 @@ func spawn_enemy_for_route(
 		blocking_lane_id,
 		formation_route_index,
 		String(monster_definition.get("display_name", String(monster_type))),
-		StringName(monster_definition.get("type_marker", &""))
+		StringName(monster_definition.get("type_marker", &"")),
+		bool(monster_definition.get("formation_can_participate", true)),
+		monster_definition
 	)
 	enemy.reached_entrance.connect(handle_enemy_arrival)
 	enemy.enemy_died.connect(handle_enemy_death)

@@ -21,6 +21,9 @@ signal damage_resolved(
 
 const BODY_RADIUS := 13.0
 const HEALTH_BAR_WIDTH := 34.0
+const RUSH_STATE_APPROACH: StringName = &"APPROACH"
+const RUSH_STATE_PREPARING: StringName = &"PREPARING_RUSH"
+const RUSH_STATE_RUSHING: StringName = &"RUSHING"
 
 var runtime_id: StringName = &""
 var route_id: StringName = &""
@@ -80,6 +83,23 @@ var total_damage_prevented := 0
 var command_is_target := false
 var command_is_related := false
 var command_is_hovered := false
+var rush_enabled := false
+var rush_trigger_progress := 1.0
+var rush_prepare_duration := 0.0
+var rush_duration := 0.0
+var rush_speed_multiplier := 1.0
+var rush_once := true
+var rush_state: StringName = RUSH_STATE_APPROACH
+var rush_prepare_elapsed := 0.0
+var rush_elapsed := 0.0
+var rush_consumed := false
+var rush_runtime_elapsed := 0.0
+var rush_visual_phase := 0.0
+var rush_prepare_start_distance := -1.0
+var rush_start_distance := -1.0
+var rush_end_distance := -1.0
+var rush_state_history: Array[StringName] = []
+var rush_transition_records: Array[Dictionary] = []
 
 
 func configure(
@@ -99,7 +119,9 @@ func configure(
 	new_blocking_lane_id: StringName = &"",
 	new_formation_route_index: int = 0,
 	new_display_name: String = "",
-	new_type_marker: StringName = &""
+	new_type_marker: StringName = &"",
+	new_formation_can_participate: bool = true,
+	new_rush_config: Dictionary = {}
 ) -> void:
 	runtime_id = new_runtime_id
 	route_id = new_route_id
@@ -129,7 +151,7 @@ func configure(
 	route_progress = 0.0
 	traveled_distance = 0.0
 	hit_flash_remaining = 0.0
-	formation_can_participate = true
+	formation_can_participate = new_formation_can_participate
 	last_damage_source_type = &"UNSPECIFIED"
 	last_raw_damage = 0
 	last_applied_damage = 0
@@ -146,6 +168,42 @@ func configure(
 	reset_formation_state()
 	set_command_visual(false, false, false)
 	set_route_points(new_route_points, false)
+	configure_rush(new_rush_config)
+	queue_redraw()
+
+
+func configure_rush(config: Dictionary) -> void:
+	rush_enabled = bool(config.get("rush_enabled", false))
+	rush_trigger_progress = clampf(
+		float(config.get("rush_trigger_progress", 1.0)),
+		0.0,
+		1.0
+	)
+	rush_prepare_duration = maxf(
+		0.0,
+		float(config.get("rush_prepare_duration", 0.0))
+	)
+	rush_duration = maxf(0.0, float(config.get("rush_duration", 0.0)))
+	rush_speed_multiplier = maxf(
+		1.0,
+		float(config.get("rush_speed_multiplier", 1.0))
+	)
+	rush_once = bool(config.get("rush_once", true))
+	reset_rush_runtime()
+
+
+func reset_rush_runtime() -> void:
+	rush_state = RUSH_STATE_APPROACH
+	rush_prepare_elapsed = 0.0
+	rush_elapsed = 0.0
+	rush_consumed = false
+	rush_runtime_elapsed = 0.0
+	rush_visual_phase = 0.0
+	rush_prepare_start_distance = -1.0
+	rush_start_distance = -1.0
+	rush_end_distance = -1.0
+	rush_state_history = [RUSH_STATE_APPROACH]
+	rush_transition_records.clear()
 	queue_redraw()
 
 
@@ -171,7 +229,8 @@ func set_route_points(
 
 
 func advance(delta: float) -> void:
-	tick_visual(delta)
+	var safe_delta := maxf(0.0, delta)
+	tick_visual(safe_delta)
 	if (
 		settlement_completed
 		or is_dead
@@ -179,35 +238,22 @@ func advance(delta: float) -> void:
 		or total_route_length <= 0.0
 	):
 		return
-	traveled_distance = minf(
-		total_route_length,
-		traveled_distance + get_effective_move_speed() * maxf(0.0, delta)
-	)
-	route_progress = traveled_distance / total_route_length
-	base_route_position = get_position_at_distance(traveled_distance)
-	if not formation_slot_active:
-		formation_steering_offset = formation_steering_offset.move_toward(
-			Vector2.ZERO,
-			65.0 * maxf(0.0, delta)
-		)
-	position = base_route_position + formation_steering_offset
-	if traveled_distance < total_route_length:
-		return
-	settlement_completed = true
-	reached_entrance.emit(runtime_id, route_id, leak_damage)
+	advance_rush_timeline(safe_delta, true)
 
 
 func advance_blocked_combat(delta: float) -> void:
-	tick_visual(delta)
+	var safe_delta := maxf(0.0, delta)
+	tick_visual(safe_delta)
 	if (
 		settlement_completed
 		or is_dead
 		or blocked_by_character_id == &""
 	):
 		return
+	advance_rush_timeline(safe_delta, false)
 	current_attack_cooldown = maxf(
 		0.0,
-		current_attack_cooldown - maxf(0.0, delta)
+		current_attack_cooldown - safe_delta
 	)
 	if current_attack_cooldown > 0.0:
 		return
@@ -217,6 +263,175 @@ func advance_blocked_combat(delta: float) -> void:
 		blocked_by_character_id,
 		attack_damage
 	)
+
+
+func advance_rush_timeline(delta: float, allow_movement: bool) -> void:
+	var remaining := maxf(0.0, delta)
+	var transition_guard := 0
+	while remaining > 0.000001 and not settlement_completed and not is_dead:
+		transition_guard += 1
+		if transition_guard > 8:
+			break
+		if not rush_enabled or rush_consumed:
+			var normal_step := move_for_duration(remaining, 1.0, allow_movement)
+			rush_runtime_elapsed += normal_step
+			remaining -= normal_step
+			if normal_step <= 0.000001 or settlement_completed:
+				return
+			continue
+		match rush_state:
+			RUSH_STATE_APPROACH:
+				var trigger_distance := total_route_length * rush_trigger_progress
+				if traveled_distance + 0.0001 >= trigger_distance:
+					begin_rush_preparation()
+					continue
+				if not allow_movement:
+					rush_runtime_elapsed += remaining
+					remaining = 0.0
+					continue
+				var base_speed := get_base_effective_move_speed()
+				if base_speed <= 0.0:
+					rush_runtime_elapsed += remaining
+					remaining = 0.0
+					continue
+				var time_to_trigger := maxf(
+					0.0,
+					(trigger_distance - traveled_distance) / base_speed
+				)
+				var approach_step := minf(remaining, time_to_trigger)
+				var approach_consumed := move_for_duration(approach_step, 1.0, true)
+				rush_runtime_elapsed += approach_consumed
+				remaining -= approach_consumed
+				if settlement_completed:
+					return
+				if time_to_trigger <= approach_consumed + 0.000001:
+					begin_rush_preparation()
+				elif approach_consumed <= 0.000001:
+					remaining = 0.0
+			RUSH_STATE_PREPARING:
+				var prepare_remaining := maxf(
+					0.0,
+					rush_prepare_duration - rush_prepare_elapsed
+				)
+				var prepare_step := minf(remaining, prepare_remaining)
+				var prepare_consumed := move_for_duration(
+					prepare_step,
+					1.0,
+					allow_movement
+				)
+				rush_prepare_elapsed += prepare_consumed
+				rush_runtime_elapsed += prepare_consumed
+				remaining -= prepare_consumed
+				if settlement_completed:
+					return
+				if prepare_remaining <= prepare_consumed + 0.000001:
+					begin_rushing()
+				elif prepare_consumed <= 0.000001:
+					remaining = 0.0
+			RUSH_STATE_RUSHING:
+				var active_remaining := maxf(0.0, rush_duration - rush_elapsed)
+				var rush_step := minf(remaining, active_remaining)
+				var rush_consumed_time := move_for_duration(
+					rush_step,
+					rush_speed_multiplier,
+					allow_movement
+				)
+				rush_elapsed += rush_consumed_time
+				rush_runtime_elapsed += rush_consumed_time
+				remaining -= rush_consumed_time
+				if settlement_completed:
+					return
+				if active_remaining <= rush_consumed_time + 0.000001:
+					finish_rushing()
+				elif rush_consumed_time <= 0.000001:
+					remaining = 0.0
+			_:
+				set_rush_state(RUSH_STATE_APPROACH)
+
+
+func move_for_duration(duration: float, speed_multiplier: float, allow_movement: bool) -> float:
+	var safe_duration := maxf(0.0, duration)
+	if safe_duration <= 0.0:
+		return 0.0
+	if not allow_movement:
+		return safe_duration
+	var effective_speed := (
+		get_base_effective_move_speed() * maxf(0.0, speed_multiplier)
+	)
+	if effective_speed <= 0.0:
+		return safe_duration
+	var remaining_route_distance := maxf(0.0, total_route_length - traveled_distance)
+	var reaches_entrance := (
+		effective_speed * safe_duration + 0.0001 >= remaining_route_distance
+	)
+	var consumed_duration := minf(
+		safe_duration,
+		remaining_route_distance / effective_speed
+	)
+	traveled_distance = (
+		total_route_length
+		if reaches_entrance
+		else minf(
+			total_route_length,
+			traveled_distance + effective_speed * consumed_duration
+		)
+	)
+	route_progress = traveled_distance / total_route_length
+	base_route_position = get_position_at_distance(traveled_distance)
+	if not formation_slot_active:
+		formation_steering_offset = formation_steering_offset.move_toward(
+			Vector2.ZERO,
+			65.0 * consumed_duration
+		)
+	position = base_route_position + formation_steering_offset
+	if not reaches_entrance:
+		return consumed_duration
+	settlement_completed = true
+	clear_active_rush_visual(true)
+	reached_entrance.emit(runtime_id, route_id, leak_damage)
+	return consumed_duration
+
+
+func begin_rush_preparation() -> void:
+	rush_prepare_elapsed = 0.0
+	rush_prepare_start_distance = traveled_distance
+	set_rush_state(RUSH_STATE_PREPARING)
+
+
+func begin_rushing() -> void:
+	rush_elapsed = 0.0
+	rush_start_distance = traveled_distance
+	set_rush_state(RUSH_STATE_RUSHING)
+
+
+func finish_rushing() -> void:
+	rush_end_distance = traveled_distance
+	rush_consumed = true
+	set_rush_state(RUSH_STATE_APPROACH)
+
+
+func set_rush_state(new_state: StringName) -> void:
+	if rush_state == new_state:
+		return
+	rush_state = new_state
+	rush_state_history.append(new_state)
+	rush_transition_records.append({
+		"state": new_state,
+		"runtime_elapsed": rush_runtime_elapsed,
+		"route_progress": route_progress,
+		"traveled_distance": traveled_distance,
+		"current_health": current_health,
+	})
+	queue_redraw()
+
+
+func clear_active_rush_visual(mark_consumed: bool) -> void:
+	if mark_consumed:
+		rush_consumed = true
+	rush_prepare_elapsed = 0.0
+	rush_elapsed = 0.0
+	rush_state = RUSH_STATE_APPROACH
+	queue_redraw()
 
 
 func set_blocker(character_id: StringName) -> bool:
@@ -273,6 +488,7 @@ func take_damage(
 	if current_health <= 0:
 		is_dead = true
 		settlement_completed = true
+		clear_active_rush_visual(true)
 		enemy_died.emit(runtime_id)
 	return applied
 
@@ -285,6 +501,7 @@ func cancel() -> void:
 	settlement_completed = true
 	blocked_by_character_id = &""
 	current_attack_cooldown = 0.0
+	clear_active_rush_visual(true)
 	reset_formation_state()
 
 
@@ -404,10 +621,21 @@ func set_protection_ranged_reduction(reduction: float) -> void:
 
 func get_effective_move_speed() -> float:
 	return (
+		get_base_effective_move_speed()
+		* get_rush_move_multiplier()
+	)
+
+
+func get_base_effective_move_speed() -> float:
+	return (
 		move_speed
 		* formation_speed_multiplier
 		* formation_temporary_speed_multiplier
 	)
+
+
+func get_rush_move_multiplier() -> float:
+	return rush_speed_multiplier if rush_state == RUSH_STATE_RUSHING else 1.0
 
 
 func get_effective_ranged_reduction() -> float:
@@ -430,10 +658,16 @@ func get_formation_shield_visual_strength() -> int:
 
 
 func tick_visual(delta: float) -> void:
-	if hit_flash_remaining <= 0.0:
-		return
-	hit_flash_remaining = maxf(0.0, hit_flash_remaining - maxf(0.0, delta))
-	queue_redraw()
+	var safe_delta := maxf(0.0, delta)
+	var needs_redraw := false
+	if rush_state in [RUSH_STATE_PREPARING, RUSH_STATE_RUSHING]:
+		rush_visual_phase += safe_delta
+		needs_redraw = true
+	if hit_flash_remaining > 0.0:
+		hit_flash_remaining = maxf(0.0, hit_flash_remaining - safe_delta)
+		needs_redraw = true
+	if needs_redraw:
+		queue_redraw()
 
 
 func get_position_at_distance(distance: float) -> Vector2:
@@ -451,6 +685,15 @@ func get_position_at_distance(distance: float) -> Vector2:
 			return route_points[index].lerp(route_points[index + 1], segment_progress)
 		remaining -= segment_length
 	return route_points[route_points.size() - 1]
+
+
+func get_route_forward_direction() -> Vector2:
+	if route_points.size() < 2 or total_route_length <= 0.0:
+		return Vector2.LEFT
+	var ahead := get_position_at_distance(minf(total_route_length, traveled_distance + 12.0))
+	var behind := get_position_at_distance(maxf(0.0, traveled_distance - 12.0))
+	var direction := (ahead - behind).normalized()
+	return direction if direction.length_squared() > 0.0 else Vector2.LEFT
 
 
 func get_runtime_snapshot() -> Dictionary:
@@ -493,6 +736,29 @@ func get_runtime_snapshot() -> Dictionary:
 		"effective_player_ranged_reduction": get_effective_player_damage_reduction(&"RANGED"),
 		"formation_shield_visual_strength": get_formation_shield_visual_strength(),
 		"formation_can_participate": formation_can_participate,
+		"rush_enabled": rush_enabled,
+		"rush_trigger_progress": rush_trigger_progress,
+		"rush_prepare_duration": rush_prepare_duration,
+		"rush_duration": rush_duration,
+		"rush_speed_multiplier": rush_speed_multiplier,
+		"rush_once": rush_once,
+		"rush_state": rush_state,
+		"rush_prepare_elapsed": rush_prepare_elapsed,
+		"rush_prepare_remaining": maxf(
+			0.0,
+			rush_prepare_duration - rush_prepare_elapsed
+		),
+		"rush_elapsed": rush_elapsed,
+		"rush_remaining": maxf(0.0, rush_duration - rush_elapsed),
+		"rush_consumed": rush_consumed,
+		"rush_move_multiplier": get_rush_move_multiplier(),
+		"rush_warning_visible": rush_state == RUSH_STATE_PREPARING,
+		"rush_trail_visible": rush_state == RUSH_STATE_RUSHING,
+		"rush_prepare_start_distance": rush_prepare_start_distance,
+		"rush_start_distance": rush_start_distance,
+		"rush_end_distance": rush_end_distance,
+		"rush_state_history": rush_state_history.duplicate(),
+		"rush_transition_records": rush_transition_records.duplicate(true),
 		"formation_zone_id": formation_zone_id,
 		"formation_zone_type": formation_zone_type,
 		"formation_slot_target": formation_slot_target,
@@ -516,6 +782,60 @@ func get_runtime_snapshot() -> Dictionary:
 
 
 func _draw() -> void:
+	var route_direction := get_route_forward_direction()
+	var route_normal := Vector2(-route_direction.y, route_direction.x)
+	if rush_state == RUSH_STATE_PREPARING:
+		var prepare_pulse := 0.5 + 0.5 * sin(rush_visual_phase * 8.0)
+		var warning_color := Color(1.0, 0.34, 0.12, 0.76 + prepare_pulse * 0.22)
+		draw_arc(
+			Vector2.ZERO,
+			BODY_RADIUS + 6.0 + prepare_pulse * 4.0,
+			0.0,
+			TAU,
+			32,
+			warning_color,
+			2.0,
+			true
+		)
+		var arrow_start := route_direction * (BODY_RADIUS + 7.0)
+		var arrow_end := route_direction * (BODY_RADIUS + 24.0)
+		draw_line(arrow_start, arrow_end, warning_color, 2.5, true)
+		draw_line(
+			arrow_end,
+			arrow_end - route_direction * 7.0 + route_normal * 5.0,
+			warning_color,
+			2.5,
+			true
+		)
+		draw_line(
+			arrow_end,
+			arrow_end - route_direction * 7.0 - route_normal * 5.0,
+			warning_color,
+			2.5,
+			true
+		)
+		draw_string(
+			ThemeDB.fallback_font,
+			Vector2(-6.0, -34.0),
+			"!",
+			HORIZONTAL_ALIGNMENT_CENTER,
+			12.0,
+			18,
+			Color(1.0, 0.72, 0.22, 1.0)
+		)
+	elif rush_state == RUSH_STATE_RUSHING:
+		var rush_color := Color(1.0, 0.46, 0.16, 0.92)
+		draw_arc(Vector2.ZERO, BODY_RADIUS + 5.0, 0.0, TAU, 28, rush_color, 2.5, true)
+		for trail_index in range(3):
+			var trail_offset := -route_direction * (18.0 + float(trail_index) * 9.0)
+			var trail_alpha := 0.62 - float(trail_index) * 0.16
+			draw_line(
+				trail_offset - route_normal * 7.0,
+				trail_offset + route_normal * 7.0,
+				Color(rush_color, trail_alpha),
+				3.0,
+				true
+			)
 	var shield_visual_strength := get_formation_shield_visual_strength()
 	if shield_visual_strength > 0:
 		var shield_color := Color(0.48, 0.82, 1.0, 0.72)
@@ -556,6 +876,15 @@ func _draw() -> void:
 			Color(0.18, 0.34, 0.50, 1.0),
 			1.5,
 			true
+		)
+	elif type_marker == &"rush_raider":
+		draw_colored_polygon(
+			PackedVector2Array([
+				Vector2(-5.0, -8.0), Vector2(5.0, -2.0),
+				Vector2(0.0, 1.0), Vector2(6.0, 7.0),
+				Vector2(-6.0, 2.0), Vector2(-1.0, -1.0),
+			]),
+			Color(1.0, 0.82, 0.32, 0.96)
 		)
 	elif monster_type == &"charge":
 		draw_colored_polygon(
@@ -609,4 +938,24 @@ func _draw() -> void:
 			44.0,
 			12,
 			Color(1.0, 0.92, 0.62, 0.92)
+		)
+	elif rush_state == RUSH_STATE_PREPARING:
+		draw_string(
+			ThemeDB.fallback_font,
+			Vector2(-28.0, 38.0),
+			"突袭准备 %.1fs" % maxf(0.0, rush_prepare_duration - rush_prepare_elapsed),
+			HORIZONTAL_ALIGNMENT_CENTER,
+			56.0,
+			11,
+			Color(1.0, 0.72, 0.32, 0.96)
+		)
+	elif rush_state == RUSH_STATE_RUSHING:
+		draw_string(
+			ThemeDB.fallback_font,
+			Vector2(-20.0, 38.0),
+			"突袭",
+			HORIZONTAL_ALIGNMENT_CENTER,
+			40.0,
+			11,
+			Color(1.0, 0.52, 0.24, 0.96)
 		)
