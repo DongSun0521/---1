@@ -10,6 +10,7 @@ const ENEMY_ATTACK_DAMAGE := 10
 const ENEMY_ATTACK_INTERVAL := 1.0
 const SPAWN_INTERVAL_SECONDS := 1.1
 const DEFAULT_BATTLEFIELD_SIZE := Vector2(1600.0, 560.0)
+const DEFAULT_CHARACTER_CONTACT_COMBAT_ENABLED := false
 
 const DAMAGE_SOURCE_MELEE: StringName = &"MELEE"
 const DAMAGE_SOURCE_RANGED: StringName = &"RANGED"
@@ -597,6 +598,12 @@ const FORMATION_DEMO_DEPLOYMENT := {
 	&"mage": &"bottom_c1",
 	&"doctor": &"middle_c2",
 }
+const CONTACT_VALIDATION_DEPLOYMENT := {
+	&"guard": &"top_c4",
+	&"hunter": &"top_c2",
+	&"mage": &"bottom_c2",
+	&"doctor": &"middle_c2",
+}
 
 const WAVE_BATTLES := {
 	&"v2_5b_validation": {
@@ -1075,6 +1082,117 @@ const WAVE_BATTLES := {
 			},
 		],
 	},
+	&"v2_7a_character_contact_validation": {
+		"battle_id": &"v2_7a_character_contact_validation",
+		"display_name": "V2-7A-R 角色接敌验证",
+		"random_seed": 2701,
+		"initial_countdown": 2.0,
+		"inter_wave_delay": 2.0,
+		"character_contact_combat_enabled": true,
+		"character_contact_combat": {
+			"eligible_enemy_profile_ids": [&"charge"],
+			"acquisition_range": 300.0,
+			"attack_range": 160.0,
+			"lane_tolerance": 112.0,
+			"backtrack_tolerance": 12.0,
+			"attack_damage": 20,
+			"attack_interval": 0.8,
+		},
+		"waves": [
+			{
+				"wave_id": &"contact_1",
+				"display_name": "单敌接敌",
+				"subwaves": [{
+					"start_offset": 0.0,
+					"spawn_groups": [{
+						"enemy_profile_id": &"charge",
+						"max_health": 120,
+						"count": 2,
+						"spawn_interval": 3.2,
+						"allowed_spawn_points": [&"spawn_center"],
+						"allowed_lanes": [&"formation_center"],
+						"selection_mode": &"round_robin",
+					}],
+				}],
+			},
+			{
+				"wave_id": &"contact_2",
+				"display_name": "多路压力",
+				"subwaves": [
+					{
+						"start_offset": 0.0,
+						"spawn_groups": [{
+							"enemy_profile_id": &"charge",
+							"max_health": 120,
+							"count": 2,
+							"spawn_interval": 2.0,
+							"allowed_spawn_points": [&"spawn_upper"],
+							"allowed_lanes": [&"formation_upper"],
+							"selection_mode": &"round_robin",
+						}],
+					},
+					{
+						"start_offset": 0.7,
+						"spawn_groups": [{
+							"enemy_profile_id": &"charge",
+							"max_health": 120,
+							"count": 2,
+							"spawn_interval": 2.0,
+							"allowed_spawn_points": [&"spawn_lower"],
+							"allowed_lanes": [&"formation_lower"],
+							"selection_mode": &"round_robin",
+						}],
+					},
+					{
+						"start_offset": 1.4,
+						"spawn_groups": [{
+							"enemy_profile_id": &"charge",
+							"max_health": 120,
+							"count": 1,
+							"spawn_interval": 0.0,
+							"allowed_spawn_points": [&"spawn_center"],
+							"allowed_lanes": [&"formation_center"],
+							"selection_mode": &"round_robin",
+						}],
+					},
+				],
+			},
+			{
+				"wave_id": &"contact_3",
+				"display_name": "持续压力",
+				"subwaves": [
+					{
+						"start_offset": 0.0,
+						"spawn_groups": [{
+							"enemy_profile_id": &"charge",
+							"max_health": 120,
+							"count": 3,
+							"spawn_interval": 1.25,
+							"allowed_spawn_points": [&"spawn_center"],
+							"allowed_lanes": [&"formation_center"],
+							"selection_mode": &"round_robin",
+						}],
+					},
+					{
+						"start_offset": 0.6,
+						"spawn_groups": [{
+							"enemy_profile_id": &"charge",
+							"max_health": 120,
+							"count": 2,
+							"spawn_interval": 1.8,
+							"allowed_spawn_points": [
+								&"spawn_upper", &"spawn_lower",
+							],
+							"allowed_lanes": [
+								&"formation_upper", &"formation_lower",
+							],
+							"selection_mode": &"round_robin",
+						}],
+					},
+				],
+			},
+		],
+	},
 }
 
 const SCENARIO_IDS: Array[StringName] = [
@@ -1088,6 +1206,7 @@ const SCENARIO_IDS: Array[StringName] = [
 	&"formation_guard_validation",
 	&"rush_raider_validation",
 	&"mixed_threat_validation",
+	&"character_contact_validation",
 ]
 const SCENARIOS := {
 	&"survival": {
@@ -1308,6 +1427,15 @@ const SCENARIOS := {
 		"active_spawn_point_ids": [
 			&"spawn_upper_outer", &"spawn_upper", &"spawn_center",
 			&"spawn_lower", &"spawn_lower_outer",
+		],
+	},
+	&"character_contact_validation": {
+		"display_name": "V2-7A-R 角色接敌验证",
+		"description": "三段普通敌人接敌、攻击、角色倒下与恢复推进验证。",
+		"formations_enabled": false,
+		"wave_battle_id": &"v2_7a_character_contact_validation",
+		"active_spawn_point_ids": [
+			&"spawn_upper", &"spawn_center", &"spawn_lower",
 		],
 	},
 }
@@ -1696,6 +1824,8 @@ static func get_recommended_deployment(
 		&"mixed_threat_validation",
 	]:
 		return FORMATION_DEMO_DEPLOYMENT.duplicate(true)
+	if scenario_id == &"character_contact_validation":
+		return CONTACT_VALIDATION_DEPLOYMENT.duplicate(true)
 	return RECOMMENDED_DEPLOYMENT.duplicate(true)
 
 

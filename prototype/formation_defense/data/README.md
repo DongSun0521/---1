@@ -1,5 +1,21 @@
 # 原型数据目录
 
+## V2-7A-R角色接敌配置
+
+`v2_7a_character_contact_validation`使用固定种子2701和三波2/5/5普通敌人计划。
+顶层`character_contact_combat_enabled=true`是唯一启用入口；缺省值为`false`，历史battle不需要
+重复声明。`character_contact_combat`集中保存：
+
+- `eligible_enemy_profile_ids`：允许接敌的现有profile，本战斗仅为`charge`；
+- `acquisition_range`与`attack_range`：发现/跟随目标和停止攻击的逻辑距离；
+- `lane_tolerance`与`backtrack_tolerance`：路线横向兼容和避免远距离回头的容差；
+- `attack_damage`与`attack_interval`：只属于本验证战的角色伤害和冷却。
+
+当前验证值为搜索300、攻击160、垂直兼容112、回头容差12、伤害20、间隔0.8秒。三波生成组
+把普通敌人生命单独设为120以保留接敌观察窗口；普通`charge`定义及全部历史battle不变。
+角色生命继续读取原型`CHARACTER_DEFINITIONS`中的150/90/80/100运行时快照，不访问正式
+CharacterRoster，也不写入存档。
+
 ## V2-6B-P混合威胁配置
 
 `v2_6b_mixed_threat_validation`只组合现有`formation_guard`与`rush_raider`，固定种子2603，

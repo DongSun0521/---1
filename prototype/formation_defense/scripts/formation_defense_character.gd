@@ -17,8 +17,11 @@ var action_range := 0.0
 var current_cooldown := 0.0
 var current_target_id: StringName = &""
 var is_alive := true
+var is_incapacitated := false
 var action_count := 0
 var total_effect_amount := 0
+var total_damage_taken := 0
+var incapacitation_count := 0
 var attack_damage := 0
 var heal_amount := 0
 var block_capacity := 0
@@ -27,6 +30,10 @@ var blocked_enemy_ids: Array[StringName] = []
 var body_color := Color.WHITE
 var show_action_range := false
 var last_action_type: StringName = &""
+var contact_combat_enabled := false
+var has_been_contacted := false
+var hit_flash_remaining := 0.0
+var hit_reaction_elapsed := 0.0
 
 
 func configure(new_character_id: StringName, definition: Dictionary) -> void:
@@ -78,11 +85,61 @@ func reset_combat_state() -> void:
 	current_cooldown = 0.0
 	current_target_id = &""
 	is_alive = true
+	is_incapacitated = false
 	action_count = 0
 	total_effect_amount = 0
+	total_damage_taken = 0
+	incapacitation_count = 0
 	blocked_enemy_ids.clear()
 	last_action_type = &""
+	has_been_contacted = false
+	hit_flash_remaining = 0.0
+	hit_reaction_elapsed = 0.0
 	queue_redraw()
+
+
+func set_contact_combat_enabled(enabled: bool) -> void:
+	contact_combat_enabled = enabled
+	if not enabled:
+		has_been_contacted = false
+		hit_flash_remaining = 0.0
+		hit_reaction_elapsed = 0.0
+	queue_redraw()
+
+
+func mark_contacted() -> void:
+	if not contact_combat_enabled:
+		return
+	has_been_contacted = true
+	queue_redraw()
+
+
+func tick_contact_visual(delta: float) -> void:
+	if not contact_combat_enabled:
+		return
+	var safe_delta := maxf(0.0, delta)
+	var needs_redraw := false
+	if hit_flash_remaining > 0.0:
+		hit_flash_remaining = maxf(0.0, hit_flash_remaining - safe_delta)
+		hit_reaction_elapsed += safe_delta
+		needs_redraw = true
+	if needs_redraw:
+		queue_redraw()
+
+
+func clear_contact_transient_visuals() -> void:
+	hit_flash_remaining = 0.0
+	hit_reaction_elapsed = 0.0
+	queue_redraw()
+
+
+func is_health_bar_visible() -> bool:
+	return (
+		not contact_combat_enabled
+		or has_been_contacted
+		or current_health < max_health
+		or is_incapacitated
+	)
 
 
 func set_selected(selected: bool) -> void:
@@ -120,11 +177,17 @@ func has_block_capacity() -> bool:
 func take_damage(amount: int) -> int:
 	if not is_alive or amount <= 0:
 		return 0
+	mark_contacted()
 	var previous_health := current_health
 	current_health = maxi(0, current_health - amount)
 	var applied := previous_health - current_health
+	total_damage_taken += applied
+	hit_flash_remaining = 0.14
+	hit_reaction_elapsed = 0.0
 	if current_health <= 0:
 		is_alive = false
+		is_incapacitated = true
+		incapacitation_count += 1
 		current_target_id = &""
 		character_died.emit(character_id)
 	queue_redraw()
@@ -219,7 +282,10 @@ func get_legal_enemy_candidates(active_enemies: Array) -> Array:
 		if enemy.is_dead or enemy.settlement_completed:
 			continue
 		if role_id == &"guard":
-			if (
+			if bool(enemy.character_contact_combat_enabled):
+				if StringName(enemy.contact_target_id) != character_id:
+					continue
+			elif (
 				StringName(enemy.blocked_by_character_id) != character_id
 				or not blocked_enemy_ids.has(StringName(enemy.runtime_id))
 			):
@@ -290,14 +356,21 @@ func get_runtime_snapshot() -> Dictionary:
 		"current_cooldown": current_cooldown,
 		"current_target_id": current_target_id,
 		"is_alive": is_alive,
+		"is_incapacitated": is_incapacitated,
 		"action_count": action_count,
 		"total_effect_amount": total_effect_amount,
+		"total_damage_taken": total_damage_taken,
+		"incapacitation_count": incapacitation_count,
 		"attack_damage": attack_damage,
 		"heal_amount": heal_amount,
 		"block_capacity": block_capacity,
 		"damage_source_type": damage_source_type,
 		"blocked_enemy_ids": blocked_enemy_ids.duplicate(),
 		"last_action_type": last_action_type,
+		"contact_combat_enabled": contact_combat_enabled,
+		"has_been_contacted": has_been_contacted,
+		"hit_flash_remaining": hit_flash_remaining,
+		"health_bar_visible": is_health_bar_visible(),
 	}
 
 
@@ -324,17 +397,35 @@ func _draw() -> void:
 			2.0,
 			true
 		)
+	var body_offset := Vector2.ZERO
+	if contact_combat_enabled and hit_flash_remaining > 0.0:
+		body_offset.x = sin(hit_reaction_elapsed * 90.0) * 2.5
 	var visible_color := body_color if is_alive else Color(0.28, 0.30, 0.34, 1.0)
-	draw_circle(Vector2.ZERO, BODY_RADIUS + 3.0, Color(0.02, 0.03, 0.05, 0.9))
-	draw_circle(Vector2.ZERO, BODY_RADIUS, visible_color)
-	draw_circle(Vector2(-5.0, -5.0), 3.5, Color(1.0, 1.0, 1.0, 0.8))
+	if contact_combat_enabled and hit_flash_remaining > 0.0 and is_alive:
+		visible_color = Color.WHITE
+	if contact_combat_enabled and is_incapacitated:
+		visible_color.a = 0.46
+	draw_circle(body_offset, BODY_RADIUS + 3.0, Color(0.02, 0.03, 0.05, 0.9))
+	draw_circle(body_offset, BODY_RADIUS, visible_color)
+	draw_circle(body_offset + Vector2(-5.0, -5.0), 3.5, Color(1.0, 1.0, 1.0, 0.8))
 	var health_ratio := clampf(float(current_health) / float(max_health), 0.0, 1.0)
 	var health_origin := Vector2(-HEALTH_BAR_WIDTH * 0.5, -27.0)
-	draw_rect(
-		Rect2(health_origin, Vector2(HEALTH_BAR_WIDTH, 6.0)),
-		Color(0.08, 0.10, 0.13, 0.95)
-	)
-	draw_rect(
-		Rect2(health_origin, Vector2(HEALTH_BAR_WIDTH * health_ratio, 6.0)),
-		Color(0.36, 0.94, 0.55, 1.0)
-	)
+	if is_health_bar_visible():
+		draw_rect(
+			Rect2(health_origin, Vector2(HEALTH_BAR_WIDTH, 6.0)),
+			Color(0.08, 0.10, 0.13, 0.95)
+		)
+		draw_rect(
+			Rect2(health_origin, Vector2(HEALTH_BAR_WIDTH * health_ratio, 6.0)),
+			Color(0.36, 0.94, 0.55, 1.0)
+		)
+	if contact_combat_enabled and is_incapacitated:
+		draw_string(
+			ThemeDB.fallback_font,
+			Vector2(-22.0, 38.0),
+			"倒下",
+			HORIZONTAL_ALIGNMENT_CENTER,
+			44.0,
+			12,
+			Color(0.92, 0.94, 1.0, 0.92)
+		)

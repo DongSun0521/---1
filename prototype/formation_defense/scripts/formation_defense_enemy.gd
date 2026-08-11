@@ -24,6 +24,9 @@ const HEALTH_BAR_WIDTH := 34.0
 const RUSH_STATE_APPROACH: StringName = &"APPROACH"
 const RUSH_STATE_PREPARING: StringName = &"PREPARING_RUSH"
 const RUSH_STATE_RUSHING: StringName = &"RUSHING"
+const CONTACT_STATE_ADVANCING: StringName = &"ADVANCING"
+const CONTACT_STATE_ENGAGING: StringName = &"ENGAGING_CHARACTER"
+const CONTACT_STATE_ATTACKING: StringName = &"ATTACKING_CHARACTER"
 
 var runtime_id: StringName = &""
 var route_id: StringName = &""
@@ -100,6 +103,20 @@ var rush_start_distance := -1.0
 var rush_end_distance := -1.0
 var rush_state_history: Array[StringName] = []
 var rush_transition_records: Array[Dictionary] = []
+var character_contact_combat_enabled := false
+var contact_state: StringName = CONTACT_STATE_ADVANCING
+var contact_target_id: StringName = &""
+var contact_acquisition_range := 0.0
+var contact_attack_range := 0.0
+var contact_lane_tolerance := 0.0
+var contact_backtrack_tolerance := 0.0
+var contact_attack_damage := 0
+var contact_attack_interval := 1.0
+var contact_attack_count := 0
+var contact_target_acquisition_count := 0
+var contact_attack_flash_remaining := 0.0
+var contact_state_history: Array[StringName] = []
+var contact_target_history: Array[StringName] = []
 
 
 func configure(
@@ -121,7 +138,8 @@ func configure(
 	new_display_name: String = "",
 	new_type_marker: StringName = &"",
 	new_formation_can_participate: bool = true,
-	new_rush_config: Dictionary = {}
+	new_rush_config: Dictionary = {},
+	new_contact_config: Dictionary = {}
 ) -> void:
 	runtime_id = new_runtime_id
 	route_id = new_route_id
@@ -169,6 +187,7 @@ func configure(
 	set_command_visual(false, false, false)
 	set_route_points(new_route_points, false)
 	configure_rush(new_rush_config)
+	configure_character_contact(new_contact_config)
 	queue_redraw()
 
 
@@ -205,6 +224,100 @@ func reset_rush_runtime() -> void:
 	rush_state_history = [RUSH_STATE_APPROACH]
 	rush_transition_records.clear()
 	queue_redraw()
+
+
+func configure_character_contact(config: Dictionary) -> void:
+	character_contact_combat_enabled = bool(config.get("enabled", false))
+	contact_acquisition_range = maxf(
+		0.0,
+		float(config.get("acquisition_range", 0.0))
+	)
+	contact_attack_range = clampf(
+		float(config.get("attack_range", 0.0)),
+		0.0,
+		contact_acquisition_range
+	)
+	contact_lane_tolerance = maxf(
+		0.0,
+		float(config.get("lane_tolerance", 0.0))
+	)
+	contact_backtrack_tolerance = maxf(
+		0.0,
+		float(config.get("backtrack_tolerance", 0.0))
+	)
+	contact_attack_damage = maxi(
+		0,
+		int(config.get("attack_damage", attack_damage))
+	)
+	contact_attack_interval = maxf(
+		0.05,
+		float(config.get("attack_interval", attack_interval))
+	)
+	reset_character_contact_runtime()
+
+
+func reset_character_contact_runtime() -> void:
+	contact_state = CONTACT_STATE_ADVANCING
+	contact_target_id = &""
+	contact_attack_count = 0
+	contact_target_acquisition_count = 0
+	contact_attack_flash_remaining = 0.0
+	contact_state_history = [CONTACT_STATE_ADVANCING]
+	contact_target_history.clear()
+	queue_redraw()
+
+
+func set_character_contact_target(character_id: StringName) -> bool:
+	if (
+		not character_contact_combat_enabled
+		or settlement_completed
+		or is_dead
+		or character_id == &""
+	):
+		return false
+	if contact_target_id == character_id:
+		return false
+	if blocked_by_character_id != &"":
+		clear_blocker()
+	contact_target_id = character_id
+	contact_target_acquisition_count += 1
+	contact_target_history.append(character_id)
+	set_contact_state(CONTACT_STATE_ENGAGING)
+	return true
+
+
+func set_character_contact_attacking() -> bool:
+	if not character_contact_combat_enabled or contact_target_id == &"":
+		return false
+	var changed := set_contact_state(CONTACT_STATE_ATTACKING)
+	set_blocker(contact_target_id)
+	return changed
+
+
+func set_character_contact_engaging() -> bool:
+	if not character_contact_combat_enabled or contact_target_id == &"":
+		return false
+	if blocked_by_character_id != &"":
+		clear_blocker(contact_target_id)
+	return set_contact_state(CONTACT_STATE_ENGAGING)
+
+
+func clear_character_contact() -> StringName:
+	var previous_target := contact_target_id
+	if blocked_by_character_id != &"":
+		clear_blocker()
+	contact_target_id = &""
+	set_contact_state(CONTACT_STATE_ADVANCING)
+	return previous_target
+
+
+func set_contact_state(new_state: StringName) -> bool:
+	if contact_state == new_state:
+		return false
+	contact_state = new_state
+	contact_state_history.append(new_state)
+	queue_redraw()
+	return true
 
 
 func set_route_points(
@@ -257,11 +370,15 @@ func advance_blocked_combat(delta: float) -> void:
 	)
 	if current_attack_cooldown > 0.0:
 		return
-	current_attack_cooldown = attack_interval
+	current_attack_cooldown = get_active_attack_interval()
+	if character_contact_combat_enabled:
+		contact_attack_count += 1
+		contact_attack_flash_remaining = 0.16
+		queue_redraw()
 	attacked_blocker.emit(
 		runtime_id,
 		blocked_by_character_id,
-		attack_damage
+		get_active_attack_damage()
 	)
 
 
@@ -442,7 +559,7 @@ func set_blocker(character_id: StringName) -> bool:
 	if blocked_by_character_id != &"":
 		return false
 	blocked_by_character_id = character_id
-	current_attack_cooldown = attack_interval
+	current_attack_cooldown = get_active_attack_interval()
 	queue_redraw()
 	return true
 
@@ -499,6 +616,7 @@ func mark_death_settled() -> void:
 
 func cancel() -> void:
 	settlement_completed = true
+	clear_character_contact()
 	blocked_by_character_id = &""
 	current_attack_cooldown = 0.0
 	clear_active_rush_visual(true)
@@ -666,8 +784,22 @@ func tick_visual(delta: float) -> void:
 	if hit_flash_remaining > 0.0:
 		hit_flash_remaining = maxf(0.0, hit_flash_remaining - safe_delta)
 		needs_redraw = true
+	if contact_attack_flash_remaining > 0.0:
+		contact_attack_flash_remaining = maxf(
+			0.0,
+			contact_attack_flash_remaining - safe_delta
+		)
+		needs_redraw = true
 	if needs_redraw:
 		queue_redraw()
+
+
+func get_active_attack_damage() -> int:
+	return contact_attack_damage if character_contact_combat_enabled else attack_damage
+
+
+func get_active_attack_interval() -> float:
+	return contact_attack_interval if character_contact_combat_enabled else attack_interval
 
 
 func get_position_at_distance(distance: float) -> Vector2:
@@ -759,6 +891,20 @@ func get_runtime_snapshot() -> Dictionary:
 		"rush_end_distance": rush_end_distance,
 		"rush_state_history": rush_state_history.duplicate(),
 		"rush_transition_records": rush_transition_records.duplicate(true),
+		"character_contact_combat_enabled": character_contact_combat_enabled,
+		"contact_state": contact_state,
+		"contact_target_id": contact_target_id,
+		"contact_acquisition_range": contact_acquisition_range,
+		"contact_attack_range": contact_attack_range,
+		"contact_lane_tolerance": contact_lane_tolerance,
+		"contact_backtrack_tolerance": contact_backtrack_tolerance,
+		"contact_attack_damage": contact_attack_damage,
+		"contact_attack_interval": contact_attack_interval,
+		"contact_attack_count": contact_attack_count,
+		"contact_target_acquisition_count": contact_target_acquisition_count,
+		"contact_attack_flash_remaining": contact_attack_flash_remaining,
+		"contact_state_history": contact_state_history.duplicate(),
+		"contact_target_history": contact_target_history.duplicate(),
 		"formation_zone_id": formation_zone_id,
 		"formation_zone_type": formation_zone_type,
 		"formation_slot_target": formation_slot_target,
@@ -912,6 +1058,21 @@ func _draw() -> void:
 			24,
 			Color(1.0, 0.72, 0.26, 0.9),
 			2.0,
+			true
+		)
+	if character_contact_combat_enabled and contact_attack_flash_remaining > 0.0:
+		var attack_color := Color(1.0, 0.82, 0.38, 0.96)
+		var swing_start := -route_normal * 14.0 - route_direction * 4.0
+		var swing_end := route_normal * 14.0 + route_direction * 9.0
+		draw_line(swing_start, swing_end, attack_color, 3.0, true)
+		draw_arc(
+			Vector2.ZERO,
+			BODY_RADIUS + 8.0,
+			-0.8,
+			0.8,
+			18,
+			attack_color,
+			2.5,
 			true
 		)
 	var health_ratio := clampf(float(current_health) / float(max_health), 0.0, 1.0)

@@ -111,6 +111,12 @@ var block_event_count := 0
 var enemy_attack_event_count := 0
 var character_attack_event_count := 0
 var healing_event_count := 0
+var character_contact_acquisition_count := 0
+var character_contact_attack_state_count := 0
+var character_contact_resume_count := 0
+var character_contact_wrong_lane_attack_count := 0
+var character_contact_target_switch_count := 0
+var character_contact_events: Array[Dictionary] = []
 var formation_damage_reduction_event_count := 0
 var formation_damage_prevented_total := 0
 var formation_damage_reduction_events_by_profile: Dictionary = {}
@@ -478,6 +484,7 @@ func select_scenario(scenario_id: StringName) -> bool:
 	if not PrototypeConfig.SCENARIOS.has(scenario_id):
 		return false
 	selected_scenario_id = scenario_id
+	apply_character_contact_runtime_state()
 	var option_index := find_scenario_option(scenario_id)
 	if option_index >= 0 and scenario_option.selected != option_index:
 		scenario_option.select(option_index)
@@ -493,6 +500,64 @@ func select_scenario(scenario_id: StringName) -> bool:
 func is_wave_scenario_enabled() -> bool:
 	var scenario := PrototypeConfig.get_scenario(selected_scenario_id)
 	return StringName(scenario.get("wave_battle_id", &"")) != &""
+
+
+func get_selected_wave_battle_config() -> Dictionary:
+	if not is_wave_scenario_enabled():
+		return {}
+	var scenario := PrototypeConfig.get_scenario(selected_scenario_id)
+	return PrototypeConfig.get_wave_battle_config(
+		StringName(scenario.get("wave_battle_id", &""))
+	)
+
+
+func is_character_contact_combat_enabled() -> bool:
+	return bool(
+		get_selected_wave_battle_config().get(
+			"character_contact_combat_enabled",
+			PrototypeConfig.DEFAULT_CHARACTER_CONTACT_COMBAT_ENABLED
+		)
+	)
+
+
+func get_character_contact_runtime_config(
+	enemy_profile_id: StringName = &""
+) -> Dictionary:
+	if not is_character_contact_combat_enabled():
+		return {"enabled": false}
+	var battle_config := get_selected_wave_battle_config()
+	var contact_config: Dictionary = battle_config.get(
+		"character_contact_combat",
+		{}
+	).duplicate(true)
+	var eligible_profiles: Array = contact_config.get(
+		"eligible_enemy_profile_ids",
+		[]
+	)
+	if (
+		enemy_profile_id != &""
+		and not eligible_profiles.is_empty()
+		and enemy_profile_id not in eligible_profiles
+	):
+		return {"enabled": false}
+	contact_config["enabled"] = true
+	return contact_config
+
+
+func apply_character_contact_runtime_state() -> void:
+	var enabled := is_character_contact_combat_enabled()
+	for character in character_nodes.values():
+		if is_instance_valid(character):
+			character.set_contact_combat_enabled(enabled)
+
+
+func reset_character_contact_statistics() -> void:
+	character_contact_acquisition_count = 0
+	character_contact_attack_state_count = 0
+	character_contact_resume_count = 0
+	character_contact_wrong_lane_attack_count = 0
+	character_contact_target_switch_count = 0
+	character_contact_events.clear()
 
 
 func configure_wave_director() -> bool:
@@ -645,6 +710,7 @@ func start_battle() -> bool:
 		return false
 	clear_active_enemies()
 	reset_character_combat_states()
+	apply_character_contact_runtime_state()
 	village_durability = PrototypeConfig.VILLAGE_MAX_DURABILITY
 	rebuild_spawn_plan()
 	spawn_index = 0
@@ -666,6 +732,7 @@ func start_battle() -> bool:
 	enemy_attack_event_count = 0
 	character_attack_event_count = 0
 	healing_event_count = 0
+	reset_character_contact_statistics()
 	formation_damage_reduction_event_count = 0
 	formation_damage_prevented_total = 0
 	formation_damage_reduction_events_by_profile.clear()
@@ -697,6 +764,7 @@ func restart_battle() -> void:
 	run_sequence += 1
 	clear_active_enemies()
 	reset_character_combat_states()
+	apply_character_contact_runtime_state()
 	battle_state = BattleState.READY
 	village_durability = PrototypeConfig.VILLAGE_MAX_DURABILITY
 	rebuild_spawn_plan()
@@ -719,6 +787,7 @@ func restart_battle() -> void:
 	enemy_attack_event_count = 0
 	character_attack_event_count = 0
 	healing_event_count = 0
+	reset_character_contact_statistics()
 	formation_damage_reduction_event_count = 0
 	formation_damage_prevented_total = 0
 	formation_damage_reduction_events_by_profile.clear()
@@ -750,6 +819,9 @@ func simulate_step(delta: float) -> void:
 		return
 	var safe_delta := maxf(0.0, delta)
 	battle_elapsed += safe_delta
+	for character in character_nodes.values():
+		if is_instance_valid(character):
+			character.tick_contact_visual(safe_delta)
 	if is_wave_scenario_enabled():
 		wave_director.advance(safe_delta)
 	else:
@@ -912,6 +984,7 @@ func spawn_enemy_for_route(
 	var enemy_id := StringName("run_%d_enemy_%d" % [run_sequence, sequence])
 	next_enemy_sequence += 1
 	var monster_definition := PrototypeConfig.get_monster_definition(monster_type)
+	var contact_config := get_character_contact_runtime_config(monster_type)
 	var enemy_color: Color = (
 		monster_definition.get("body_color", Color.WHITE)
 		if is_formation_scenario_enabled()
@@ -958,7 +1031,8 @@ func spawn_enemy_for_route(
 		String(monster_definition.get("display_name", String(monster_type))),
 		StringName(monster_definition.get("type_marker", &"")),
 		bool(monster_definition.get("formation_can_participate", true)),
-		monster_definition
+		monster_definition,
+		contact_config
 	)
 	enemy.reached_entrance.connect(handle_enemy_arrival)
 	enemy.enemy_died.connect(handle_enemy_death)
@@ -983,6 +1057,9 @@ func spawn_enemy_for_route(
 
 func update_enemy_blocking() -> void:
 	if battle_state != BattleState.RUNNING:
+		return
+	if is_character_contact_combat_enabled():
+		update_enemy_character_contacts()
 		return
 	for enemy in active_enemies.values():
 		if not is_instance_valid(enemy):
@@ -1010,6 +1087,163 @@ func update_enemy_blocking() -> void:
 				block_event_count += 1
 				break
 			character.remove_blocked_enemy(enemy.runtime_id)
+
+
+func update_enemy_character_contacts() -> void:
+	var enemies: Array = active_enemies.values()
+	enemies.sort_custom(func(left, right):
+		if int(left.spawn_sequence) != int(right.spawn_sequence):
+			return int(left.spawn_sequence) < int(right.spawn_sequence)
+		return String(left.runtime_id) < String(right.runtime_id)
+	)
+	for enemy in enemies:
+		if (
+			not is_instance_valid(enemy)
+			or not bool(enemy.character_contact_combat_enabled)
+			or enemy.is_dead
+			or enemy.settlement_completed
+		):
+			continue
+		var target = character_nodes.get(enemy.contact_target_id)
+		if enemy.contact_target_id != &"" and not is_contact_target_still_valid(
+			target,
+			enemy
+		):
+			release_enemy_character_contact(enemy, &"TARGET_INVALID", true)
+			target = null
+		if enemy.contact_target_id == &"":
+			target = choose_character_contact_target(enemy)
+			if is_instance_valid(target):
+				var previous_history_size: int = enemy.contact_target_history.size()
+				if enemy.set_character_contact_target(target.character_id):
+					if previous_history_size > 0:
+						character_contact_target_switch_count += 1
+					character_contact_acquisition_count += 1
+					target.mark_contacted()
+					record_character_contact_event(
+						&"TARGET_ACQUIRED",
+						enemy,
+						target
+					)
+		if not is_instance_valid(target):
+			continue
+		var target_distance: float = enemy.position.distance_to(target.position)
+		if target_distance <= float(enemy.contact_attack_range) + 0.0001:
+			if enemy.set_character_contact_attacking():
+				character_contact_attack_state_count += 1
+				record_character_contact_event(
+					&"ATTACKING_STARTED",
+					enemy,
+					target
+				)
+		else:
+			enemy.set_character_contact_engaging()
+
+
+func choose_character_contact_target(enemy):
+	var candidates: Array = []
+	for character_id: StringName in PrototypeConfig.get_character_ids():
+		var character = character_nodes.get(character_id)
+		if is_character_in_contact_acquisition(character, enemy):
+			candidates.append(character)
+	if candidates.is_empty():
+		return null
+	candidates.sort_custom(func(left, right):
+		return is_better_character_contact_target(left, right, enemy)
+	)
+	return candidates[0]
+
+
+func is_contact_target_still_valid(character, enemy) -> bool:
+	return (
+		is_instance_valid(character)
+		and is_instance_valid(enemy)
+		and character.is_deployed()
+		and character.is_alive
+		and StringName(character.lane_id) == StringName(enemy.blocking_lane_id)
+	)
+
+
+func is_character_in_contact_acquisition(character, enemy) -> bool:
+	if not is_contact_target_still_valid(character, enemy):
+		return false
+	var offset: Vector2 = character.position - enemy.position
+	var forward: Vector2 = enemy.get_route_forward_direction()
+	var forward_distance := offset.dot(forward)
+	var lateral_distance := absf(offset.cross(forward))
+	return (
+		forward_distance >= -float(enemy.contact_backtrack_tolerance)
+		and forward_distance <= float(enemy.contact_acquisition_range)
+		and lateral_distance <= float(enemy.contact_lane_tolerance)
+		and offset.length() <= float(enemy.contact_acquisition_range)
+	)
+
+
+func is_better_character_contact_target(candidate, current_best, enemy) -> bool:
+	var forward: Vector2 = enemy.get_route_forward_direction()
+	var candidate_offset: Vector2 = candidate.position - enemy.position
+	var best_offset: Vector2 = current_best.position - enemy.position
+	var candidate_forward := candidate_offset.dot(forward)
+	var best_forward := best_offset.dot(forward)
+	if absf(candidate_forward - best_forward) > 0.0001:
+		return candidate_forward < best_forward
+	var candidate_distance := candidate_offset.length_squared()
+	var best_distance := best_offset.length_squared()
+	if absf(candidate_distance - best_distance) > 0.0001:
+		return candidate_distance < best_distance
+	var candidate_slot := String(candidate.deployed_slot_id)
+	var best_slot := String(current_best.deployed_slot_id)
+	if candidate_slot != best_slot:
+		return candidate_slot < best_slot
+	return String(candidate.character_id) < String(current_best.character_id)
+
+
+func release_enemy_character_contact(
+	enemy,
+	reason: StringName,
+	count_resume: bool
+) -> void:
+	if not is_instance_valid(enemy) or enemy.contact_target_id == &"":
+		return
+	var target = character_nodes.get(enemy.contact_target_id)
+	var previous_target_id: StringName = enemy.clear_character_contact()
+	if count_resume:
+		character_contact_resume_count += 1
+	character_contact_events.append({
+		"time": snappedf(battle_elapsed, 0.001),
+		"kind": &"RESUMED_ADVANCE",
+		"enemy_id": StringName(enemy.runtime_id),
+		"enemy_sequence": int(enemy.spawn_sequence),
+		"target_id": previous_target_id,
+		"reason": reason,
+		"route_id": StringName(enemy.route_id),
+		"lane_id": StringName(enemy.blocking_lane_id),
+		"target_valid": is_instance_valid(target),
+	})
+
+
+func record_character_contact_event(
+	kind: StringName,
+	enemy,
+	character,
+	extra: Dictionary = {}
+) -> void:
+	var event := {
+		"time": snappedf(battle_elapsed, 0.001),
+		"kind": kind,
+		"enemy_id": StringName(enemy.runtime_id),
+		"enemy_sequence": int(enemy.spawn_sequence),
+		"target_id": StringName(character.character_id),
+		"target_slot_id": StringName(character.deployed_slot_id),
+		"route_id": StringName(enemy.route_id),
+		"lane_id": StringName(enemy.blocking_lane_id),
+		"target_lane_id": StringName(character.lane_id),
+		"enemy_position": enemy.position,
+		"target_position": character.position,
+	}
+	for key in extra.keys():
+		event[key] = extra[key]
+	character_contact_events.append(event)
 
 
 func can_character_block_enemy(character, enemy) -> bool:
@@ -1148,17 +1382,41 @@ func handle_enemy_attack(
 		return
 	var enemy = active_enemies[enemy_id]
 	var character = character_nodes.get(character_id)
+	if not is_instance_valid(enemy) or not is_instance_valid(character):
+		return
+	var contact_attack_valid := (
+		bool(enemy.character_contact_combat_enabled)
+		and StringName(enemy.contact_target_id) == character_id
+		and StringName(enemy.contact_state)
+			== PrototypeEnemy.CONTACT_STATE_ATTACKING
+	)
 	if (
-		not is_instance_valid(enemy)
-		or not is_instance_valid(character)
-		or enemy.is_dead
+		enemy.is_dead
 		or enemy.blocked_by_character_id != character_id
 		or not character.is_alive
+		or (
+			bool(enemy.character_contact_combat_enabled)
+			and not contact_attack_valid
+		)
 	):
 		return
+	if contact_attack_valid and character.lane_id != enemy.blocking_lane_id:
+		character_contact_wrong_lane_attack_count += 1
 	var applied := int(character.take_damage(maxi(0, damage)))
 	if applied > 0:
 		enemy_attack_event_count += 1
+		if contact_attack_valid:
+			record_character_contact_event(
+				&"ATTACK_RESOLVED",
+				enemy,
+				character,
+				{
+					"raw_damage": maxi(0, damage),
+					"applied_damage": applied,
+					"remaining_health": int(character.current_health),
+					"incapacitated": bool(character.is_incapacitated),
+				}
+			)
 
 
 func handle_character_death(character_id: StringName) -> void:
@@ -1171,6 +1429,25 @@ func handle_character_death(character_id: StringName) -> void:
 		if is_instance_valid(enemy):
 			enemy.clear_blocker(character_id)
 	character.clear_blocked_enemies()
+	var contact_enemies: Array = active_enemies.values()
+	contact_enemies.sort_custom(func(left, right):
+		return int(left.spawn_sequence) < int(right.spawn_sequence)
+	)
+	for enemy in contact_enemies:
+		if (
+			is_instance_valid(enemy)
+			and StringName(enemy.contact_target_id) == character_id
+		):
+			record_character_contact_event(
+				&"CHARACTER_INCAPACITATED",
+				enemy,
+				character
+			)
+			release_enemy_character_contact(
+				enemy,
+				&"TARGET_INCAPACITATED",
+				true
+			)
 	update_ui()
 
 
@@ -1263,6 +1540,12 @@ func reset_character_combat_states() -> void:
 			character.reset_combat_state()
 
 
+func clear_character_contact_transient_visuals() -> void:
+	for character in character_nodes.values():
+		if is_instance_valid(character):
+			character.clear_contact_transient_visuals()
+
+
 func evaluate_victory() -> void:
 	if battle_state != BattleState.RUNNING:
 		return
@@ -1292,6 +1575,7 @@ func finish_victory() -> void:
 		return
 	battle_state = BattleState.VICTORY
 	clear_attack_visuals()
+	clear_character_contact_transient_visuals()
 	command_controller.handle_battle_end(&"BATTLE_END")
 	battle_finish_count += 1
 	update_ui()
@@ -1308,6 +1592,7 @@ func finish_defeat() -> void:
 	village_durability = 0
 	battle_finish_count += 1
 	clear_active_enemies()
+	clear_character_contact_transient_visuals()
 	update_ui()
 	battle_finished.emit(&"defeat")
 
@@ -1614,6 +1899,18 @@ func get_battle_snapshot() -> Dictionary:
 		"enemy_attack_event_count": enemy_attack_event_count,
 		"character_attack_event_count": character_attack_event_count,
 		"healing_event_count": healing_event_count,
+		"character_contact_combat_enabled":
+			is_character_contact_combat_enabled(),
+		"character_contact_acquisition_count":
+			character_contact_acquisition_count,
+		"character_contact_attack_state_count":
+			character_contact_attack_state_count,
+		"character_contact_resume_count": character_contact_resume_count,
+		"character_contact_wrong_lane_attack_count":
+			character_contact_wrong_lane_attack_count,
+		"character_contact_target_switch_count":
+			character_contact_target_switch_count,
+		"character_contact_events": character_contact_events.duplicate(true),
 		"formation_damage_reduction_event_count":
 			formation_damage_reduction_event_count,
 		"formation_damage_prevented_total": formation_damage_prevented_total,
