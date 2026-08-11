@@ -968,6 +968,113 @@ const WAVE_BATTLES := {
 			},
 		],
 	},
+	&"v2_6b_mixed_threat_validation": {
+		"battle_id": &"v2_6b_mixed_threat_validation",
+		"display_name": "V2-6B-P 混合威胁验证",
+		"random_seed": 2603,
+		"initial_countdown": 3.0,
+		"inter_wave_delay": 3.0,
+		"formation_approach_speed": 52.0,
+		"formation_completion_tolerance": 12.0,
+		"formation_duration_multiplier": 0.0,
+		"b_formation_prepare_duration": 3.0,
+		"waves": [
+			{
+				"wave_id": &"mixed_1",
+				"display_name": "护阵前压",
+				"subwaves": [{
+					"start_offset": 0.0,
+					"spawn_groups": [{
+						"enemy_profile_id": &"formation_guard",
+						"count": 2,
+						"spawn_interval": 0.6,
+						"allowed_spawn_points": [&"spawn_center"],
+						"allowed_lanes": [&"formation_center"],
+						"selection_mode": &"round_robin",
+					}],
+				}],
+			},
+			{
+				"wave_id": &"mixed_2",
+				"display_name": "突袭识别",
+				"subwaves": [
+					{
+						"start_offset": 0.0,
+						"spawn_groups": [{
+							"enemy_profile_id": &"rush_raider",
+							"count": 1,
+							"spawn_interval": 0.0,
+							"allowed_spawn_points": [&"spawn_center"],
+							"allowed_lanes": [&"formation_center"],
+							"selection_mode": &"round_robin",
+						}],
+					},
+				],
+			},
+			{
+				"wave_id": &"mixed_3",
+				"display_name": "第一次目标冲突",
+				"subwaves": [
+					{
+						"start_offset": 3.0,
+						"spawn_groups": [{
+							"enemy_profile_id": &"rush_raider",
+							"count": 1,
+							"spawn_interval": 0.0,
+							"allowed_spawn_points": [&"spawn_center"],
+							"allowed_lanes": [&"formation_center"],
+							"selection_mode": &"round_robin",
+						}],
+					},
+					{
+						"start_offset": 0.0,
+						"spawn_groups": [{
+							"enemy_profile_id": &"formation_guard",
+							"count": 6,
+							"spawn_interval": 0.45,
+							"allowed_spawn_points": [&"spawn_upper", &"spawn_center"],
+							"allowed_lanes": [&"formation_upper", &"formation_center"],
+							"selection_mode": &"round_robin",
+						}],
+					},
+				],
+			},
+			{
+				"wave_id": &"mixed_4",
+				"display_name": "双威胁收束",
+				"subwaves": [
+					{
+						"start_offset": 2.5,
+						"spawn_groups": [{
+							"enemy_profile_id": &"rush_raider",
+							"count": 5,
+							"spawn_interval": 0.9,
+							"allowed_spawn_points": [
+								&"spawn_upper_outer", &"spawn_upper", &"spawn_center",
+								&"spawn_lower", &"spawn_lower_outer",
+							],
+							"allowed_lanes": [
+								&"formation_upper_outer", &"formation_upper", &"formation_center",
+								&"formation_lower", &"formation_lower_outer",
+							],
+							"selection_mode": &"round_robin",
+						}],
+					},
+					{
+						"start_offset": 0.0,
+						"spawn_groups": [{
+							"enemy_profile_id": &"formation_guard",
+							"count": 8,
+							"spawn_interval": 0.5,
+							"allowed_spawn_points": [&"spawn_center", &"spawn_lower"],
+							"allowed_lanes": [&"formation_center", &"formation_lower"],
+							"selection_mode": &"round_robin",
+						}],
+					},
+				],
+			},
+		],
+	},
 }
 
 const SCENARIO_IDS: Array[StringName] = [
@@ -980,6 +1087,7 @@ const SCENARIO_IDS: Array[StringName] = [
 	&"pacing_validation",
 	&"formation_guard_validation",
 	&"rush_raider_validation",
+	&"mixed_threat_validation",
 ]
 const SCENARIOS := {
 	&"survival": {
@@ -1187,6 +1295,16 @@ const SCENARIOS := {
 		"description": "三波验证突袭预警、爆发推进与真实集火拦截。",
 		"formations_enabled": true,
 		"wave_battle_id": &"v2_6b_rush_raider_validation",
+		"active_spawn_point_ids": [
+			&"spawn_upper_outer", &"spawn_upper", &"spawn_center",
+			&"spawn_lower", &"spawn_lower_outer",
+		],
+	},
+	&"mixed_threat_validation": {
+		"display_name": "V2-6B-P 护阵与突袭混合验证",
+		"description": "四段验证持续护阵压力与短时突袭预警之间的目标切换。",
+		"formations_enabled": true,
+		"wave_battle_id": &"v2_6b_mixed_threat_validation",
 		"active_spawn_point_ids": [
 			&"spawn_upper_outer", &"spawn_upper", &"spawn_center",
 			&"spawn_lower", &"spawn_lower_outer",
@@ -1575,6 +1693,7 @@ static func get_recommended_deployment(
 		&"formation_demo", &"command_demo", &"wave_validation", &"pacing_validation",
 		&"formation_guard_validation",
 		&"rush_raider_validation",
+		&"mixed_threat_validation",
 	]:
 		return FORMATION_DEMO_DEPLOYMENT.duplicate(true)
 	return RECOMMENDED_DEPLOYMENT.duplicate(true)
