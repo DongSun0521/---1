@@ -34,6 +34,23 @@ var contact_combat_enabled := false
 var has_been_contacted := false
 var hit_flash_remaining := 0.0
 var hit_reaction_elapsed := 0.0
+var heal_flash_remaining := 0.0
+var ultimate_enabled := false
+var ultimate_energy := 0.0
+var ultimate_energy_max := 100.0
+var ultimate_energy_cost := 100.0
+var ultimate_energy_regen_per_second := 0.0
+var ultimate_ready := false
+var is_ultimate_targeting := false
+var ultimate_definition: Dictionary = {}
+var ultimate_release_count := 0
+var ultimate_first_ready_time := -1.0
+var ultimate_passive_energy_gained := 0.0
+var ultimate_event_energy_gained := 0.0
+var ultimate_event_trigger_count := 0
+var ultimate_event_trigger_counts: Dictionary = {}
+var ultimate_event_throttled_count := 0
+var ultimate_last_event_trigger_time := -1.0
 
 
 func configure(new_character_id: StringName, definition: Dictionary) -> void:
@@ -95,6 +112,8 @@ func reset_combat_state() -> void:
 	has_been_contacted = false
 	hit_flash_remaining = 0.0
 	hit_reaction_elapsed = 0.0
+	heal_flash_remaining = 0.0
+	reset_ultimate_runtime()
 	queue_redraw()
 
 
@@ -115,13 +134,16 @@ func mark_contacted() -> void:
 
 
 func tick_contact_visual(delta: float) -> void:
-	if not contact_combat_enabled:
+	if not contact_combat_enabled and not ultimate_enabled:
 		return
 	var safe_delta := maxf(0.0, delta)
 	var needs_redraw := false
 	if hit_flash_remaining > 0.0:
 		hit_flash_remaining = maxf(0.0, hit_flash_remaining - safe_delta)
 		hit_reaction_elapsed += safe_delta
+		needs_redraw = true
+	if heal_flash_remaining > 0.0:
+		heal_flash_remaining = maxf(0.0, heal_flash_remaining - safe_delta)
 		needs_redraw = true
 	if needs_redraw:
 		queue_redraw()
@@ -130,7 +152,152 @@ func tick_contact_visual(delta: float) -> void:
 func clear_contact_transient_visuals() -> void:
 	hit_flash_remaining = 0.0
 	hit_reaction_elapsed = 0.0
+	heal_flash_remaining = 0.0
 	queue_redraw()
+
+
+func configure_ultimate(enabled: bool, definition: Dictionary = {}) -> void:
+	ultimate_enabled = enabled
+	ultimate_definition = definition.duplicate(true) if enabled else {}
+	ultimate_energy_max = maxf(
+		1.0,
+		float(ultimate_definition.get("energy_max", 100.0))
+	)
+	ultimate_energy_cost = clampf(
+		float(ultimate_definition.get("energy_cost", ultimate_energy_max)),
+		0.0001,
+		ultimate_energy_max
+	)
+	ultimate_energy_regen_per_second = maxf(
+		0.0,
+		float(ultimate_definition.get("energy_regen_per_second", 0.0))
+	)
+	reset_ultimate_runtime()
+
+
+func reset_ultimate_runtime() -> void:
+	ultimate_energy = 0.0
+	ultimate_ready = false
+	is_ultimate_targeting = false
+	ultimate_release_count = 0
+	ultimate_first_ready_time = -1.0
+	ultimate_passive_energy_gained = 0.0
+	ultimate_event_energy_gained = 0.0
+	ultimate_event_trigger_count = 0
+	ultimate_event_trigger_counts.clear()
+	ultimate_event_throttled_count = 0
+	ultimate_last_event_trigger_time = -1.0
+	queue_redraw()
+
+
+func clear_ultimate_event_throttle() -> void:
+	ultimate_last_event_trigger_time = -1.0
+
+
+func advance_ultimate_energy(
+	delta: float,
+	battle_running: bool,
+	battle_time: float
+) -> void:
+	if (
+		not ultimate_enabled
+		or not battle_running
+		or not is_deployed()
+		or not is_alive
+		or ultimate_ready
+	):
+		return
+	var applied := add_ultimate_energy(
+		maxf(0.0, delta) * ultimate_energy_regen_per_second,
+		battle_time
+	)
+	ultimate_passive_energy_gained += applied
+
+
+func grant_ultimate_event_energy(
+	event_type: StringName,
+	battle_time: float,
+	battle_running: bool
+) -> float:
+	if (
+		not ultimate_enabled
+		or not battle_running
+		or not is_deployed()
+		or not is_alive
+		or ultimate_ready
+	):
+		return 0.0
+	var event_energy: Dictionary = ultimate_definition.get("event_energy", {})
+	var configured_amount := maxf(0.0, float(event_energy.get(event_type, 0.0)))
+	if configured_amount <= 0.0:
+		return 0.0
+	var trigger_interval := maxf(
+		0.0,
+		float(ultimate_definition.get("event_trigger_interval", 0.0))
+	)
+	if (
+		trigger_interval > 0.0
+		and ultimate_last_event_trigger_time >= 0.0
+		and battle_time - ultimate_last_event_trigger_time
+			< trigger_interval - 0.0001
+	):
+		ultimate_event_throttled_count += 1
+		return 0.0
+	var applied := add_ultimate_energy(configured_amount, battle_time)
+	if applied <= 0.0:
+		return 0.0
+	ultimate_last_event_trigger_time = battle_time
+	ultimate_event_energy_gained += applied
+	ultimate_event_trigger_count += 1
+	ultimate_event_trigger_counts[event_type] = int(
+		ultimate_event_trigger_counts.get(event_type, 0)
+	) + 1
+	return applied
+
+
+func add_ultimate_energy(amount: float, battle_time: float) -> float:
+	if amount <= 0.0 or ultimate_ready:
+		return 0.0
+	var previous_energy := ultimate_energy
+	ultimate_energy = minf(ultimate_energy_max, ultimate_energy + amount)
+	var applied := ultimate_energy - previous_energy
+	ultimate_ready = ultimate_energy >= ultimate_energy_cost - 0.0001
+	if ultimate_ready and ultimate_first_ready_time < 0.0:
+		ultimate_first_ready_time = battle_time
+	return applied
+
+
+func can_begin_ultimate_targeting() -> bool:
+	return (
+		ultimate_enabled
+		and is_deployed()
+		and is_alive
+		and ultimate_ready
+		and not is_ultimate_targeting
+	)
+
+
+func begin_ultimate_targeting() -> bool:
+	if not can_begin_ultimate_targeting():
+		return false
+	is_ultimate_targeting = true
+	return true
+
+
+func cancel_ultimate_targeting() -> bool:
+	var was_targeting := is_ultimate_targeting
+	is_ultimate_targeting = false
+	return was_targeting
+
+
+func consume_ultimate_energy() -> bool:
+	if not ultimate_enabled or not ultimate_ready or not is_alive:
+		return false
+	ultimate_energy = maxf(0.0, ultimate_energy - ultimate_energy_cost)
+	ultimate_ready = ultimate_energy >= ultimate_energy_cost - 0.0001
+	is_ultimate_targeting = false
+	ultimate_release_count += 1
+	return true
 
 
 func is_health_bar_visible() -> bool:
@@ -189,6 +356,7 @@ func take_damage(amount: int) -> int:
 		is_incapacitated = true
 		incapacitation_count += 1
 		current_target_id = &""
+		clear_ultimate_event_throttle()
 		character_died.emit(character_id)
 	queue_redraw()
 	return applied
@@ -200,6 +368,8 @@ func receive_healing(amount: int) -> int:
 	var previous_health := current_health
 	current_health = mini(max_health, current_health + amount)
 	var applied := current_health - previous_health
+	if applied > 0 and ultimate_enabled:
+		heal_flash_remaining = 0.18
 	queue_redraw()
 	return applied
 
@@ -248,6 +418,7 @@ func simulate_action(
 	)
 	if dealt <= 0:
 		return {}
+	var completed_kill := bool(attack_target.is_dead)
 	current_cooldown = action_interval
 	action_count += 1
 	total_effect_amount += dealt
@@ -258,6 +429,7 @@ func simulate_action(
 		"source_id": character_id,
 		"target_id": resolved_target_id,
 		"amount": dealt,
+		"completed_kill": completed_kill,
 		"attack_sequence_id": action_count,
 		"origin_position": attack_origin_position,
 		"target_position": attack_target_position,
@@ -371,6 +543,21 @@ func get_runtime_snapshot() -> Dictionary:
 		"has_been_contacted": has_been_contacted,
 		"hit_flash_remaining": hit_flash_remaining,
 		"health_bar_visible": is_health_bar_visible(),
+		"ultimate_enabled": ultimate_enabled,
+		"ultimate_energy": ultimate_energy,
+		"ultimate_energy_max": ultimate_energy_max,
+		"ultimate_energy_cost": ultimate_energy_cost,
+		"ultimate_ready": ultimate_ready,
+		"is_ultimate_targeting": is_ultimate_targeting,
+		"ultimate_release_count": ultimate_release_count,
+		"ultimate_id": StringName(ultimate_definition.get("ultimate_id", &"")),
+		"ultimate_first_ready_time": ultimate_first_ready_time,
+		"ultimate_passive_energy_gained": ultimate_passive_energy_gained,
+		"ultimate_event_energy_gained": ultimate_event_energy_gained,
+		"ultimate_event_trigger_count": ultimate_event_trigger_count,
+		"ultimate_event_trigger_counts": ultimate_event_trigger_counts.duplicate(true),
+		"ultimate_event_throttled_count": ultimate_event_throttled_count,
+		"ultimate_last_event_trigger_time": ultimate_last_event_trigger_time,
 	}
 
 
@@ -403,6 +590,8 @@ func _draw() -> void:
 	var visible_color := body_color if is_alive else Color(0.28, 0.30, 0.34, 1.0)
 	if contact_combat_enabled and hit_flash_remaining > 0.0 and is_alive:
 		visible_color = Color.WHITE
+	elif ultimate_enabled and heal_flash_remaining > 0.0 and is_alive:
+		visible_color = Color(0.52, 1.0, 0.72, 1.0)
 	if contact_combat_enabled and is_incapacitated:
 		visible_color.a = 0.46
 	draw_circle(body_offset, BODY_RADIUS + 3.0, Color(0.02, 0.03, 0.05, 0.9))

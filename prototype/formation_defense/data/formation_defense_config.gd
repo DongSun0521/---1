@@ -11,6 +11,9 @@ const ENEMY_ATTACK_INTERVAL := 1.0
 const SPAWN_INTERVAL_SECONDS := 1.1
 const DEFAULT_BATTLEFIELD_SIZE := Vector2(1600.0, 560.0)
 const DEFAULT_CHARACTER_CONTACT_COMBAT_ENABLED := false
+const DEFAULT_CHARACTER_ULTIMATE_ENABLED := false
+const ULTIMATE_CAST_AREA_FORWARD_RECT: StringName = &"FORWARD_RECT"
+const ULTIMATE_CAST_DIRECTION_TOWARD_SPAWN: StringName = &"TOWARD_ENEMY_SPAWN"
 
 const DAMAGE_SOURCE_MELEE: StringName = &"MELEE"
 const DAMAGE_SOURCE_RANGED: StringName = &"RANGED"
@@ -586,6 +589,79 @@ const CHARACTER_DEFINITIONS := {
 	},
 }
 
+const CHARACTER_ULTIMATE_DEFINITIONS := {
+	&"guard": {
+		"ultimate_id": &"ground_shock",
+		"display_name": "震地冲击",
+		"target_type": &"POSITION",
+		"energy_max": 100.0,
+		"energy_cost": 100.0,
+		"energy_regen_per_second": 1.5,
+		"event_energy": {&"DAMAGE_TAKEN": 3.0},
+		"event_trigger_interval": 0.75,
+		"cast_area_shape": ULTIMATE_CAST_AREA_FORWARD_RECT,
+		"cast_rect_width_ratio": 0.5,
+		"cast_rect_direction": ULTIMATE_CAST_DIRECTION_TOWARD_SPAWN,
+		"cast_range": 320.0,
+		"effect_radius": 140.0,
+		"damage": 35,
+		"stun_duration": 1.5,
+		"color": Color(1.0, 0.58, 0.28, 1.0),
+		"damage_source_type": DAMAGE_SOURCE_MELEE,
+	},
+	&"hunter": {
+		"ultimate_id": &"precision_snipe",
+		"display_name": "精准狙击",
+		"target_type": &"ENEMY",
+		"energy_max": 100.0,
+		"energy_cost": 100.0,
+		"energy_regen_per_second": 1.8,
+		"event_energy": {
+			&"NORMAL_ATTACK_HIT": 1.0,
+			&"NORMAL_ATTACK_KILL": 5.0,
+		},
+		"cast_range": 900.0,
+		"snap_radius": 70.0,
+		"damage": 140,
+		"color": Color(1.0, 0.84, 0.35, 1.0),
+		"damage_source_type": DAMAGE_SOURCE_RANGED,
+	},
+	&"mage": {
+		"ultimate_id": &"arcane_blast",
+		"display_name": "奥术爆破",
+		"target_type": &"POSITION",
+		"energy_max": 100.0,
+		"energy_cost": 100.0,
+		"energy_regen_per_second": 2.2,
+		"event_energy": {&"NORMAL_ATTACK_HIT": 2.0},
+		"cast_area_shape": ULTIMATE_CAST_AREA_FORWARD_RECT,
+		"cast_rect_width_ratio": 0.5,
+		"cast_rect_direction": ULTIMATE_CAST_DIRECTION_TOWARD_SPAWN,
+		"cast_range": 700.0,
+		"effect_radius": 180.0,
+		"damage": 70,
+		"color": Color(0.60, 0.42, 1.0, 1.0),
+		"damage_source_type": DAMAGE_SOURCE_RANGED,
+	},
+	&"doctor": {
+		"ultimate_id": &"group_heal",
+		"display_name": "群体治疗",
+		"target_type": &"POSITION",
+		"energy_max": 100.0,
+		"energy_cost": 100.0,
+		"energy_regen_per_second": 1.3,
+		"event_energy": {&"AUTO_HEAL": 4.0},
+		"cast_area_shape": ULTIMATE_CAST_AREA_FORWARD_RECT,
+		"cast_rect_width_ratio": 0.5,
+		"cast_rect_direction": ULTIMATE_CAST_DIRECTION_TOWARD_SPAWN,
+		"cast_range": 600.0,
+		"effect_radius": 200.0,
+		"healing": 90,
+		"color": Color(0.36, 1.0, 0.72, 1.0),
+		"damage_source_type": DAMAGE_SOURCE_UNSPECIFIED,
+	},
+}
+
 const RECOMMENDED_DEPLOYMENT := {
 	&"guard": &"middle_c4",
 	&"hunter": &"top_c2",
@@ -600,6 +676,12 @@ const FORMATION_DEMO_DEPLOYMENT := {
 }
 const CONTACT_VALIDATION_DEPLOYMENT := {
 	&"guard": &"top_c4",
+	&"hunter": &"top_c2",
+	&"mage": &"bottom_c2",
+	&"doctor": &"middle_c2",
+}
+const ULTIMATE_VALIDATION_DEPLOYMENT := {
+	&"guard": &"middle_c4",
 	&"hunter": &"top_c2",
 	&"mage": &"bottom_c2",
 	&"doctor": &"middle_c2",
@@ -1193,6 +1275,161 @@ const WAVE_BATTLES := {
 			},
 		],
 	},
+	&"v2_7a_player_ultimate_validation": {
+		"battle_id": &"v2_7a_player_ultimate_validation",
+		"display_name": "V2-7A-P 角色大招验证",
+		"random_seed": 2702,
+		"initial_countdown": 2.0,
+		"inter_wave_delay": 2.0,
+		"character_contact_combat_enabled": true,
+		"character_ultimate_enabled": true,
+		"character_contact_combat": {
+			"eligible_enemy_profile_ids": [&"charge"],
+			"acquisition_range": 300.0,
+			"attack_range": 160.0,
+			"lane_tolerance": 112.0,
+			"backtrack_tolerance": 12.0,
+			"attack_damage": 10,
+			"attack_interval": 1.0,
+		},
+		"waves": [
+			{
+				"wave_id": &"ultimate_1",
+				"display_name": "能量与基础释放",
+				"subwaves": [
+					{
+						"start_offset": 0.0,
+						"spawn_groups": [{
+							"enemy_profile_id": &"charge",
+							"max_health": 220,
+							"move_speed": 42.0,
+							"count": 1,
+							"spawn_interval": 0.0,
+							"allowed_spawn_points": [&"spawn_upper"],
+							"allowed_lanes": [&"formation_upper"],
+							"selection_mode": &"round_robin",
+						}],
+					},
+					{
+						"start_offset": 1.5,
+						"spawn_groups": [{
+							"enemy_profile_id": &"charge",
+							"max_health": 220,
+							"move_speed": 42.0,
+							"count": 1,
+							"spawn_interval": 0.0,
+							"allowed_spawn_points": [&"spawn_center"],
+							"allowed_lanes": [&"formation_center"],
+							"selection_mode": &"round_robin",
+						}],
+					},
+					{
+						"start_offset": 3.0,
+						"spawn_groups": [{
+							"enemy_profile_id": &"charge",
+							"max_health": 220,
+							"move_speed": 42.0,
+							"count": 1,
+							"spawn_interval": 0.0,
+							"allowed_spawn_points": [&"spawn_lower"],
+							"allowed_lanes": [&"formation_lower"],
+							"selection_mode": &"round_robin",
+						}],
+					},
+				],
+			},
+			{
+				"wave_id": &"ultimate_2",
+				"display_name": "四职业效果",
+				"subwaves": [
+					{
+						"start_offset": 0.0,
+						"spawn_groups": [{
+							"enemy_profile_id": &"charge",
+							"max_health": 240,
+							"move_speed": 42.0,
+							"count": 2,
+							"spawn_interval": 2.0,
+							"allowed_spawn_points": [&"spawn_upper"],
+							"allowed_lanes": [&"formation_upper"],
+							"selection_mode": &"round_robin",
+						}],
+					},
+					{
+						"start_offset": 0.8,
+						"spawn_groups": [{
+							"enemy_profile_id": &"charge",
+							"max_health": 240,
+							"move_speed": 42.0,
+							"count": 2,
+							"spawn_interval": 2.0,
+							"allowed_spawn_points": [&"spawn_lower"],
+							"allowed_lanes": [&"formation_lower"],
+							"selection_mode": &"round_robin",
+						}],
+					},
+					{
+						"start_offset": 1.6,
+						"spawn_groups": [{
+							"enemy_profile_id": &"charge",
+							"max_health": 240,
+							"move_speed": 42.0,
+							"count": 2,
+							"spawn_interval": 2.5,
+							"allowed_spawn_points": [&"spawn_center"],
+							"allowed_lanes": [&"formation_center"],
+							"selection_mode": &"round_robin",
+						}],
+					},
+				],
+			},
+			{
+				"wave_id": &"ultimate_3",
+				"display_name": "持续压力",
+				"subwaves": [
+					{
+						"start_offset": 0.0,
+						"spawn_groups": [{
+							"enemy_profile_id": &"charge",
+							"max_health": 200,
+							"move_speed": 42.0,
+							"count": 3,
+							"spawn_interval": 1.8,
+							"allowed_spawn_points": [&"spawn_center"],
+							"allowed_lanes": [&"formation_center"],
+							"selection_mode": &"round_robin",
+						}],
+					},
+					{
+						"start_offset": 0.7,
+						"spawn_groups": [{
+							"enemy_profile_id": &"charge",
+							"max_health": 200,
+							"move_speed": 42.0,
+							"count": 3,
+							"spawn_interval": 1.8,
+							"allowed_spawn_points": [&"spawn_upper"],
+							"allowed_lanes": [&"formation_upper"],
+							"selection_mode": &"round_robin",
+						}],
+					},
+					{
+						"start_offset": 1.4,
+						"spawn_groups": [{
+							"enemy_profile_id": &"charge",
+							"max_health": 200,
+							"move_speed": 42.0,
+							"count": 3,
+							"spawn_interval": 1.8,
+							"allowed_spawn_points": [&"spawn_lower"],
+							"allowed_lanes": [&"formation_lower"],
+							"selection_mode": &"round_robin",
+						}],
+					},
+				],
+			},
+		],
+	},
 }
 
 const SCENARIO_IDS: Array[StringName] = [
@@ -1207,6 +1444,7 @@ const SCENARIO_IDS: Array[StringName] = [
 	&"rush_raider_validation",
 	&"mixed_threat_validation",
 	&"character_contact_validation",
+	&"player_ultimate_validation",
 ]
 const SCENARIOS := {
 	&"survival": {
@@ -1434,6 +1672,15 @@ const SCENARIOS := {
 		"description": "三段普通敌人接敌、攻击、角色倒下与恢复推进验证。",
 		"formations_enabled": false,
 		"wave_battle_id": &"v2_7a_character_contact_validation",
+		"active_spawn_point_ids": [
+			&"spawn_upper", &"spawn_center", &"spawn_lower",
+		],
+	},
+	&"player_ultimate_validation": {
+		"display_name": "V2-7A-P 角色大招验证",
+		"description": "三段能量、拖动瞄准、四职业大招与角色接敌验证。",
+		"formations_enabled": false,
+		"wave_battle_id": &"v2_7a_player_ultimate_validation",
 		"active_spawn_point_ids": [
 			&"spawn_upper", &"spawn_center", &"spawn_lower",
 		],
@@ -1826,7 +2073,13 @@ static func get_recommended_deployment(
 		return FORMATION_DEMO_DEPLOYMENT.duplicate(true)
 	if scenario_id == &"character_contact_validation":
 		return CONTACT_VALIDATION_DEPLOYMENT.duplicate(true)
+	if scenario_id == &"player_ultimate_validation":
+		return ULTIMATE_VALIDATION_DEPLOYMENT.duplicate(true)
 	return RECOMMENDED_DEPLOYMENT.duplicate(true)
+
+
+static func get_character_ultimate_definition(role_id: StringName) -> Dictionary:
+	return CHARACTER_ULTIMATE_DEFINITIONS.get(role_id, {}).duplicate(true)
 
 
 static func get_scenario_ids() -> Array[StringName]:

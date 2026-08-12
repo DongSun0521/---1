@@ -117,6 +117,9 @@ var contact_target_acquisition_count := 0
 var contact_attack_flash_remaining := 0.0
 var contact_state_history: Array[StringName] = []
 var contact_target_history: Array[StringName] = []
+var stun_remaining := 0.0
+var stun_application_count := 0
+var total_stunned_duration := 0.0
 
 
 func configure(
@@ -351,7 +354,10 @@ func advance(delta: float) -> void:
 		or total_route_length <= 0.0
 	):
 		return
-	advance_rush_timeline(safe_delta, true)
+	var active_delta := consume_stun_time(safe_delta)
+	if active_delta <= 0.0:
+		return
+	advance_rush_timeline(active_delta, true)
 
 
 func advance_blocked_combat(delta: float) -> void:
@@ -363,10 +369,13 @@ func advance_blocked_combat(delta: float) -> void:
 		or blocked_by_character_id == &""
 	):
 		return
-	advance_rush_timeline(safe_delta, false)
+	var active_delta := consume_stun_time(safe_delta)
+	if active_delta <= 0.0:
+		return
+	advance_rush_timeline(active_delta, false)
 	current_attack_cooldown = maxf(
 		0.0,
-		current_attack_cooldown - safe_delta
+		current_attack_cooldown - active_delta
 	)
 	if current_attack_cooldown > 0.0:
 		return
@@ -605,9 +614,32 @@ func take_damage(
 	if current_health <= 0:
 		is_dead = true
 		settlement_completed = true
+		stun_remaining = 0.0
 		clear_active_rush_visual(true)
 		enemy_died.emit(runtime_id)
 	return applied
+
+
+func apply_stun(duration: float) -> float:
+	if settlement_completed or is_dead or duration <= 0.0:
+		return 0.0
+	var applied_duration := maxf(stun_remaining, duration) - stun_remaining
+	stun_remaining = maxf(stun_remaining, duration)
+	stun_application_count += 1
+	total_stunned_duration += maxf(0.0, applied_duration)
+	queue_redraw()
+	return duration
+
+
+func consume_stun_time(delta: float) -> float:
+	var safe_delta := maxf(0.0, delta)
+	if stun_remaining <= 0.0:
+		return safe_delta
+	var consumed := minf(stun_remaining, safe_delta)
+	stun_remaining = maxf(0.0, stun_remaining - consumed)
+	if consumed > 0.0:
+		queue_redraw()
+	return safe_delta - consumed
 
 
 func mark_death_settled() -> void:
@@ -616,6 +648,7 @@ func mark_death_settled() -> void:
 
 func cancel() -> void:
 	settlement_completed = true
+	stun_remaining = 0.0
 	clear_character_contact()
 	blocked_by_character_id = &""
 	current_attack_cooldown = 0.0
@@ -905,6 +938,9 @@ func get_runtime_snapshot() -> Dictionary:
 		"contact_attack_flash_remaining": contact_attack_flash_remaining,
 		"contact_state_history": contact_state_history.duplicate(),
 		"contact_target_history": contact_target_history.duplicate(),
+		"stun_remaining": stun_remaining,
+		"stun_application_count": stun_application_count,
+		"total_stunned_duration": total_stunned_duration,
 		"formation_zone_id": formation_zone_id,
 		"formation_zone_type": formation_zone_type,
 		"formation_slot_target": formation_slot_target,
@@ -1075,6 +1111,19 @@ func _draw() -> void:
 			2.5,
 			true
 		)
+	if stun_remaining > 0.0:
+		draw_arc(
+			Vector2.ZERO,
+			BODY_RADIUS + 11.0,
+			0.0,
+			TAU,
+			24,
+			Color(1.0, 0.86, 0.28, 0.92),
+			2.5,
+			true
+		)
+		draw_circle(Vector2(-7.0, -29.0), 2.5, Color(1.0, 0.92, 0.45, 1.0))
+		draw_circle(Vector2(7.0, -29.0), 2.5, Color(1.0, 0.92, 0.45, 1.0))
 	var health_ratio := clampf(float(current_health) / float(max_health), 0.0, 1.0)
 	var health_origin := Vector2(-HEALTH_BAR_WIDTH * 0.5, -22.0)
 	draw_rect(

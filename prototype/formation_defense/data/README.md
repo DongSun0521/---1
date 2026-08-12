@@ -1,5 +1,20 @@
 # 原型数据目录
 
+## V2-7A-P 角色大招配置
+
+`CHARACTER_ULTIMATE_DEFINITIONS` 集中保存四名原型角色的大招数据；历史战斗缺省使用 `DEFAULT_CHARACTER_ULTIMATE_ENABLED=false`。只有 `v2_7a_player_ultimate_validation` 显式设置 `character_ultimate_enabled=true`，固定随机种子为 `2702`，并通过 `ULTIMATE_VALIDATION_DEPLOYMENT` 提供战士 `middle_c4`、游侠 `top_c2`、法师 `bottom_c2`、医生 `middle_c2` 的推荐部署。
+
+通用能量值为上限 100、合法释放消耗 100，不设置额外冷却。角色只有在战斗 `RUNNING`、已经部署且仍存活时积攒能量；重开会恢复为 0，并清除事件计数与节流时间。每个大招定义包含 `ultimate_id`、`display_name`、`target_mode`、`cast_range`、`effect_radius`、`damage` 或 `healing`、可选 `stun_duration`、能量字段和程序化表现颜色。位置型大招还使用 `cast_area_shape=FORWARD_RECT`、`cast_rect_width_ratio=0.5` 与 `cast_rect_direction=TOWARD_ENEMY_SPAWN`；矩形始终在 1802×414 逻辑战场内计算和裁切，实际作用圆则在规范化屏幕空间判定与绘制：
+
+- `guard`：位置目标，距离 320、半径 140、伤害 35、眩晕 1.5 秒。
+- `hunter`：敌人目标，距离 900、吸附半径 70、伤害 140。
+- `mage`：位置目标，距离 700、半径 180、伤害 70。
+- `doctor`：位置目标，距离 600、半径 200、治疗 90，只作用于存活且受伤角色。
+
+职业回能参数集中保存在对应大招定义中：`guard` 每秒 1.5，`DAMAGE_TAKEN` +3、节流 0.75 秒；`hunter` 每秒 1.8，`NORMAL_ATTACK_HIT` +1、`NORMAL_ATTACK_KILL` +5；`mage` 每秒 2.2，`NORMAL_ATTACK_HIT` +2；`doctor` 每秒 1.3，`AUTO_HEAL` +4。事件由现有角色普攻结果、敌人对角色正式伤害结果和医生有效自动治疗结果上报；大招结算直接复用伤害/治疗实体入口，但不经过这些普通行为事件，因此不会形成大招回能循环。
+
+验证战继续使用 V2-7A-R 已有的角色接敌运行逻辑，但拥有独立接敌参数：搜索 300、攻击距离 160、线路容差 112、回头容差 12、敌人攻击伤害 10、间隔 1.0 秒。三波分别生成 3、6、9 只现有 `charge` 敌人，共 18 只；生成组只覆盖本战所需的 220/240/200 生命与 42 移速，不改变 `charge` profile 或任何历史 battle。大招伤害、治疗与眩晕分别调用现有敌人受伤、角色治疗和敌人控制入口，不建立第二套生命、死亡或攻击结算。
+
 ## V2-7A-R角色接敌配置
 
 `v2_7a_character_contact_validation`使用固定种子2701和三波2/5/5普通敌人计划。

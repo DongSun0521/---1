@@ -17,6 +17,9 @@ const PrototypeDeploymentSlot := preload(
 const PrototypeProjectileVisual := preload(
 	"res://prototype/formation_defense/scripts/formation_defense_projectile_visual.gd"
 )
+const PrototypeUltimateOverlay := preload(
+	"res://prototype/formation_defense/scripts/formation_defense_ultimate_overlay.gd"
+)
 const PrototypeWaveDirector := preload(
 	"res://prototype/formation_defense/scripts/formation_defense_wave_director.gd"
 )
@@ -131,6 +134,23 @@ var layout_viewport_size := Vector2.ZERO
 var position_mapping_scale := Vector2.ONE
 var uniform_visual_scale := 1.0
 var wave_director: Node = null
+var ultimate_overlay: Control = null
+var ultimate_bar: PanelContainer = null
+var ultimate_button_row: HBoxContainer = null
+var ultimate_debug_label: Label = null
+var ultimate_buttons: Dictionary = {}
+var ultimate_energy_bars: Dictionary = {}
+var ultimate_targeting_character_id: StringName = &""
+var ultimate_target_enemy_id: StringName = &""
+var ultimate_pointer_logic := Vector2.ZERO
+var ultimate_preview_valid := false
+var ultimate_release_sequence := 0
+var ultimate_release_events: Array[Dictionary] = []
+var ultimate_stats_by_character: Dictionary = {}
+var ultimate_cancel_count := 0
+var ultimate_invalid_release_count := 0
+var ultimate_rejected_start_count := 0
+var ultimate_duplicate_settlement_count := 0
 
 
 func _ready() -> void:
@@ -144,6 +164,7 @@ func _ready() -> void:
 	setup_scenario_options()
 	setup_deployment_slots()
 	setup_character_roster()
+	apply_character_ultimate_runtime_state()
 	start_button.pressed.connect(start_battle)
 	restart_button.pressed.connect(restart_battle)
 	scenario_option.item_selected.connect(on_scenario_selected)
@@ -339,6 +360,8 @@ func get_global_axis_scale(canvas_item: CanvasItem) -> Vector2:
 
 
 func set_debug_panel_open(open: bool) -> void:
+	if open and ultimate_targeting_character_id != &"":
+		cancel_ultimate_targeting(&"DEBUG_PANEL_OPENED", true)
 	debug_panel_open = open
 	debug_drawer.visible = open
 	debug_toggle_button.text = "收起调试" if open else "调试"
@@ -349,6 +372,9 @@ func toggle_debug_panel() -> void:
 
 
 func handle_escape_action() -> StringName:
+	if ultimate_targeting_character_id != &"":
+		cancel_ultimate_targeting(&"PLAYER_CANCEL", true)
+		return &"CANCELED_ULTIMATE"
 	if debug_panel_open:
 		set_debug_panel_open(false)
 		return &"CLOSED_DEBUG_PANEL"
@@ -364,6 +390,23 @@ func _process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if ultimate_targeting_character_id != &"":
+		if event is InputEventMouseMotion:
+			update_ultimate_targeting_from_screen(event.position)
+			get_viewport().set_input_as_handled()
+			return
+		if event is InputEventMouseButton:
+			var targeting_button := event as InputEventMouseButton
+			if targeting_button.button_index == MOUSE_BUTTON_RIGHT \
+					and targeting_button.pressed:
+				cancel_ultimate_targeting(&"PLAYER_CANCEL", true)
+				get_viewport().set_input_as_handled()
+				return
+			if targeting_button.button_index == MOUSE_BUTTON_LEFT \
+					and not targeting_button.pressed:
+				release_ultimate_targeting_from_screen(targeting_button.position)
+				get_viewport().set_input_as_handled()
+				return
 	if not event is InputEventMouseButton:
 		return
 	var mouse_event := event as InputEventMouseButton
@@ -378,8 +421,14 @@ func _input(event: InputEvent) -> void:
 
 
 func _exit_tree() -> void:
+	cancel_ultimate_targeting(&"SCENE_EXIT", false)
 	if is_instance_valid(command_controller):
 		command_controller.handle_battle_end(&"SCENE_EXIT")
+
+
+func _notification(what: int) -> void:
+	if what in [NOTIFICATION_WM_WINDOW_FOCUS_OUT, NOTIFICATION_WM_MOUSE_EXIT]:
+		cancel_ultimate_targeting(&"INPUT_FOCUS_LOST", true)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -391,7 +440,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not event is InputEventMouseButton or not event.pressed:
 		return
 	if event.button_index == MOUSE_BUTTON_RIGHT:
-		command_controller.cancel_command(&"PLAYER_CANCEL")
+		if ultimate_targeting_character_id != &"":
+			cancel_ultimate_targeting(&"PLAYER_CANCEL", true)
+		else:
+			command_controller.cancel_command(&"PLAYER_CANCEL")
 		update_ui()
 		get_viewport().set_input_as_handled()
 
@@ -409,7 +461,10 @@ func handle_battlefield_pointer(
 	button_index: MouseButton
 ) -> bool:
 	if button_index == MOUSE_BUTTON_RIGHT:
-		command_controller.cancel_command(&"PLAYER_CANCEL")
+		if ultimate_targeting_character_id != &"":
+			cancel_ultimate_targeting(&"PLAYER_CANCEL", true)
+		else:
+			command_controller.cancel_command(&"PLAYER_CANCEL")
 		update_ui()
 		return true
 	if button_index != MOUSE_BUTTON_LEFT \
@@ -417,6 +472,7 @@ func handle_battlefield_pointer(
 		return false
 	var enemy = pick_enemy_at(local_position)
 	if is_instance_valid(enemy):
+		cancel_ultimate_targeting(&"FOCUS_COMMAND", false)
 		command_controller.issue_command(StringName(enemy.runtime_id))
 		update_ui()
 		return true
@@ -485,6 +541,7 @@ func select_scenario(scenario_id: StringName) -> bool:
 		return false
 	selected_scenario_id = scenario_id
 	apply_character_contact_runtime_state()
+	apply_character_ultimate_runtime_state()
 	var option_index := find_scenario_option(scenario_id)
 	if option_index >= 0 and scenario_option.selected != option_index:
 		scenario_option.select(option_index)
@@ -558,6 +615,712 @@ func reset_character_contact_statistics() -> void:
 	character_contact_wrong_lane_attack_count = 0
 	character_contact_target_switch_count = 0
 	character_contact_events.clear()
+
+
+func is_character_ultimate_enabled() -> bool:
+	return bool(
+		get_selected_wave_battle_config().get(
+			"character_ultimate_enabled",
+			PrototypeConfig.DEFAULT_CHARACTER_ULTIMATE_ENABLED
+		)
+	)
+
+
+func apply_character_ultimate_runtime_state() -> void:
+	var enabled := is_character_ultimate_enabled()
+	for character_id: StringName in PrototypeConfig.get_character_ids():
+		var character = character_nodes.get(character_id)
+		if not is_instance_valid(character):
+			continue
+		character.configure_ultimate(
+			enabled,
+			PrototypeConfig.get_character_ultimate_definition(character.role_id)
+		)
+	if enabled:
+		ensure_ultimate_ui()
+	else:
+		destroy_ultimate_ui()
+
+
+func reset_ultimate_statistics() -> void:
+	ultimate_release_sequence = 0
+	ultimate_release_events.clear()
+	ultimate_stats_by_character.clear()
+	for character_id: StringName in PrototypeConfig.get_character_ids():
+		ultimate_stats_by_character[character_id] = {
+			"release_count": 0,
+			"hit_count": 0,
+			"damage": 0,
+			"kill_count": 0,
+			"stun_count": 0,
+			"healed_character_count": 0,
+			"healing": 0,
+		}
+	ultimate_cancel_count = 0
+	ultimate_invalid_release_count = 0
+	ultimate_rejected_start_count = 0
+	ultimate_duplicate_settlement_count = 0
+
+
+func ensure_ultimate_ui() -> void:
+	if is_instance_valid(ultimate_bar) and is_instance_valid(ultimate_overlay):
+		return
+	ultimate_overlay = PrototypeUltimateOverlay.new()
+	ultimate_overlay.name = "UltimateOverlay"
+	ultimate_overlay.z_index = 20
+	add_child(ultimate_overlay)
+	ultimate_bar = PanelContainer.new()
+	ultimate_bar.name = "UltimateBar"
+	ultimate_bar.z_index = 25
+	ultimate_bar.mouse_filter = Control.MOUSE_FILTER_STOP
+	ultimate_bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	ultimate_bar.offset_left = -452.0
+	ultimate_bar.offset_top = -152.0
+	ultimate_bar.offset_right = 452.0
+	ultimate_bar.offset_bottom = -82.0
+	add_child(ultimate_bar)
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 8)
+	margin.add_theme_constant_override("margin_top", 6)
+	margin.add_theme_constant_override("margin_right", 8)
+	margin.add_theme_constant_override("margin_bottom", 6)
+	ultimate_bar.add_child(margin)
+	ultimate_button_row = HBoxContainer.new()
+	ultimate_button_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	ultimate_button_row.add_theme_constant_override("separation", 6)
+	margin.add_child(ultimate_button_row)
+	ultimate_buttons.clear()
+	ultimate_energy_bars.clear()
+	for character_id: StringName in PrototypeConfig.get_character_ids():
+		var button := Button.new()
+		button.name = "UltimateButton_%s" % String(character_id)
+		button.custom_minimum_size = Vector2(214.0, 58.0)
+		button.focus_mode = Control.FOCUS_NONE
+		button.add_theme_font_size_override("font_size", 13)
+		button.gui_input.connect(on_ultimate_button_gui_input.bind(character_id, button))
+		ultimate_button_row.add_child(button)
+		ultimate_buttons[character_id] = button
+		var energy_bar := ProgressBar.new()
+		energy_bar.name = "EnergyProgress"
+		energy_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		energy_bar.show_percentage = false
+		energy_bar.min_value = 0.0
+		energy_bar.max_value = 100.0
+		energy_bar.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+		energy_bar.offset_left = 8.0
+		energy_bar.offset_top = -8.0
+		energy_bar.offset_right = -8.0
+		energy_bar.offset_bottom = -3.0
+		button.add_child(energy_bar)
+		ultimate_energy_bars[character_id] = energy_bar
+	ultimate_debug_label = Label.new()
+	ultimate_debug_label.name = "UltimateDebugLabel"
+	ultimate_debug_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	ultimate_debug_label.add_theme_font_size_override("font_size", 13)
+	debug_content.add_child(ultimate_debug_label)
+	update_ultimate_ui()
+
+
+func destroy_ultimate_ui() -> void:
+	cancel_ultimate_targeting(&"FEATURE_DISABLED", false)
+	if is_instance_valid(ultimate_overlay):
+		ultimate_overlay.queue_free()
+	if is_instance_valid(ultimate_bar):
+		ultimate_bar.queue_free()
+	if is_instance_valid(ultimate_debug_label):
+		ultimate_debug_label.queue_free()
+	ultimate_overlay = null
+	ultimate_bar = null
+	ultimate_button_row = null
+	ultimate_debug_label = null
+	ultimate_buttons.clear()
+	ultimate_energy_bars.clear()
+
+
+func on_ultimate_button_gui_input(
+	event: InputEvent,
+	character_id: StringName,
+	button: Button
+) -> void:
+	if (
+		event is InputEventMouseButton
+		and event.button_index == MOUSE_BUTTON_LEFT
+		and event.pressed
+	):
+		if begin_ultimate_targeting(character_id):
+			button.accept_event()
+
+
+func update_ultimate_ui() -> void:
+	if not is_character_ultimate_enabled() or not is_instance_valid(ultimate_bar):
+		return
+	ultimate_bar.visible = true
+	var energy_parts: Array[String] = []
+	for character_id: StringName in PrototypeConfig.get_character_ids():
+		var character = character_nodes.get(character_id)
+		var button: Button = ultimate_buttons.get(character_id)
+		var energy_bar: ProgressBar = ultimate_energy_bars.get(character_id)
+		if not is_instance_valid(character) or not is_instance_valid(button):
+			continue
+		button.visible = character.is_deployed()
+		if is_instance_valid(energy_bar):
+			energy_bar.value = character.ultimate_energy
+			energy_bar.modulate = (
+				character.ultimate_definition.get("color", Color.WHITE)
+				if character.is_alive else Color(0.45, 0.45, 0.48, 0.7)
+			)
+		if not character.is_deployed():
+			continue
+		var definition: Dictionary = character.ultimate_definition
+		var state_text := "积攒中"
+		if not character.is_alive:
+			state_text = "已倒下"
+		elif character.is_ultimate_targeting:
+			state_text = "瞄准中"
+		elif character.ultimate_ready:
+			state_text = "可释放"
+		button.disabled = (
+			battle_state != BattleState.RUNNING
+			or not character.is_alive
+			or not character.ultimate_ready
+		)
+		button.text = "%s｜%s\n能量 %d/%d｜%s" % [
+			character.display_name,
+			String(definition.get("display_name", "大招")),
+			floori(character.ultimate_energy + 0.0001),
+			floori(character.ultimate_energy_max),
+			state_text,
+		]
+		button.modulate = (
+			Color(0.48, 0.50, 0.56, 0.78)
+			if not character.is_alive
+			else Color(1.12, 1.08, 0.72, 1.0)
+			if character.ultimate_ready
+			else Color.WHITE
+		)
+		energy_parts.append("%s %d%%" % [
+			character.display_name,
+			roundi(character.ultimate_energy / character.ultimate_energy_max * 100.0),
+		])
+	if is_instance_valid(ultimate_debug_label):
+		ultimate_debug_label.text = "大招：%s\n释放事件 %d｜取消 %d｜非法 %d｜%s" % [
+			String(ultimate_targeting_character_id)
+				if ultimate_targeting_character_id != &"" else "未瞄准",
+			ultimate_release_events.size(),
+			ultimate_cancel_count,
+			ultimate_invalid_release_count,
+			" / ".join(energy_parts),
+		]
+
+
+func begin_ultimate_targeting(character_id: StringName) -> bool:
+	if (
+		not is_character_ultimate_enabled()
+		or battle_state != BattleState.RUNNING
+		or debug_panel_open
+	):
+		ultimate_rejected_start_count += 1
+		return false
+	if ultimate_targeting_character_id != &"":
+		cancel_ultimate_targeting(&"REPLACED", true)
+	var character = character_nodes.get(character_id)
+	if not is_instance_valid(character) or not character.begin_ultimate_targeting():
+		ultimate_rejected_start_count += 1
+		return false
+	command_controller.cancel_command(&"ULTIMATE_TARGETING")
+	ultimate_targeting_character_id = character_id
+	ultimate_target_enemy_id = &""
+	ultimate_pointer_logic = character.position
+	ultimate_preview_valid = false
+	refresh_ultimate_preview(logic_to_screen_position(character.position), true)
+	update_ui()
+	return true
+
+
+func update_ultimate_targeting_from_screen(screen_position: Vector2) -> bool:
+	return refresh_ultimate_preview(screen_position, true)
+
+
+func refresh_ultimate_preview(
+	screen_position: Vector2,
+	allow_hunter_retarget: bool
+) -> bool:
+	if ultimate_targeting_character_id == &"":
+		return false
+	var character = character_nodes.get(ultimate_targeting_character_id)
+	if (
+		not is_instance_valid(character)
+		or not character.is_alive
+		or not character.is_ultimate_targeting
+	):
+		cancel_ultimate_targeting(&"CHARACTER_INVALID", true)
+		return false
+	ultimate_pointer_logic = screen_to_logic_position(screen_position)
+	var definition: Dictionary = character.ultimate_definition
+	var target_type := StringName(definition.get("target_type", &"POSITION"))
+	var target_logic := ultimate_pointer_logic
+	ultimate_preview_valid = false
+	if target_type == &"ENEMY":
+		var target = null
+		if allow_hunter_retarget:
+			target = pick_ultimate_enemy_target(character, ultimate_pointer_logic)
+			ultimate_target_enemy_id = (
+				StringName(target.runtime_id) if is_instance_valid(target) else &""
+			)
+		else:
+			target = active_enemies.get(ultimate_target_enemy_id)
+			if not is_ultimate_enemy_target_legal(
+				character,
+				target,
+				ultimate_pointer_logic
+			):
+				target = null
+		if is_instance_valid(target):
+			target_logic = target.position
+			ultimate_preview_valid = true
+	else:
+		ultimate_target_enemy_id = &""
+		ultimate_preview_valid = is_position_ultimate_target_legal(
+			character,
+			target_logic
+		)
+		if character.role_id == &"doctor" and ultimate_preview_valid:
+			ultimate_preview_valid = not get_ultimate_heal_targets(
+				target_logic,
+				float(definition.get("effect_radius", 0.0))
+			).is_empty()
+	if is_instance_valid(ultimate_overlay):
+		ultimate_overlay.set_preview(build_ultimate_preview(
+			character,
+			target_logic,
+			ultimate_preview_valid
+		))
+	return ultimate_preview_valid
+
+
+func release_ultimate_targeting_from_screen(screen_position: Vector2) -> bool:
+	if ultimate_targeting_character_id == &"":
+		return false
+	refresh_ultimate_preview(screen_position, false)
+	var character = character_nodes.get(ultimate_targeting_character_id)
+	if not ultimate_preview_valid or not is_instance_valid(character):
+		ultimate_invalid_release_count += 1
+		cancel_ultimate_targeting(&"INVALID_RELEASE", true)
+		return false
+	var target_logic := ultimate_pointer_logic
+	if StringName(character.ultimate_definition.get("target_type", &"POSITION")) \
+			== &"ENEMY":
+		var enemy = active_enemies.get(ultimate_target_enemy_id)
+		if not is_instance_valid(enemy):
+			ultimate_invalid_release_count += 1
+			cancel_ultimate_targeting(&"TARGET_GONE", true)
+			return false
+		target_logic = enemy.position
+	if not character.consume_ultimate_energy():
+		cancel_ultimate_targeting(&"ENERGY_INVALID", true)
+		return false
+	ultimate_release_sequence += 1
+	var release_result := apply_character_ultimate(character, target_logic)
+	record_ultimate_release(character, target_logic, release_result)
+	clear_ultimate_targeting_state()
+	update_ui()
+	return true
+
+
+func cancel_ultimate_targeting(
+	reason: StringName = &"PLAYER_CANCEL",
+	count_cancel := true
+) -> bool:
+	if ultimate_targeting_character_id == &"":
+		return false
+	var character = character_nodes.get(ultimate_targeting_character_id)
+	if is_instance_valid(character):
+		character.cancel_ultimate_targeting()
+	if count_cancel:
+		ultimate_cancel_count += 1
+		ultimate_release_events.append({
+			"time": snappedf(battle_elapsed, 0.001),
+			"kind": &"CANCELED",
+			"character_id": ultimate_targeting_character_id,
+			"reason": reason,
+		})
+	clear_ultimate_targeting_state()
+	update_ui()
+	return true
+
+
+func clear_ultimate_targeting_state() -> void:
+	ultimate_targeting_character_id = &""
+	ultimate_target_enemy_id = &""
+	ultimate_pointer_logic = Vector2.ZERO
+	ultimate_preview_valid = false
+	if is_instance_valid(ultimate_overlay):
+		ultimate_overlay.clear_preview()
+
+
+func is_position_ultimate_target_legal(character, target: Vector2) -> bool:
+	var battlefield_rect := Rect2(Vector2.ZERO, LOGICAL_BATTLEFIELD_SIZE)
+	if not battlefield_rect.has_point(target):
+		return false
+	if StringName(character.ultimate_definition.get("cast_area_shape", &"")) \
+			== PrototypeConfig.ULTIMATE_CAST_AREA_FORWARD_RECT:
+		return get_ultimate_cast_rect(character).has_point(target)
+	return character.position.distance_to(target) <= float(
+		character.ultimate_definition.get("cast_range", 0.0)
+	) + 0.0001
+
+
+func get_ultimate_cast_rect(character) -> Rect2:
+	var battlefield_rect := Rect2(Vector2.ZERO, LOGICAL_BATTLEFIELD_SIZE)
+	if not is_instance_valid(character):
+		return Rect2()
+	var definition: Dictionary = character.ultimate_definition
+	if StringName(definition.get("cast_area_shape", &"")) \
+			!= PrototypeConfig.ULTIMATE_CAST_AREA_FORWARD_RECT:
+		return Rect2()
+	var width := LOGICAL_BATTLEFIELD_SIZE.x * clampf(
+		float(definition.get("cast_rect_width_ratio", 0.0)),
+		0.0,
+		1.0
+	)
+	var forward_sign := get_ultimate_forward_x_sign(
+		StringName(definition.get("cast_rect_direction", &""))
+	)
+	var left: float = character.position.x if forward_sign > 0.0 \
+		else character.position.x - width
+	return Rect2(
+		Vector2(left, 0.0),
+		Vector2(width, LOGICAL_BATTLEFIELD_SIZE.y)
+	).intersection(battlefield_rect)
+
+
+func get_ultimate_forward_x_sign(direction: StringName) -> float:
+	if direction == PrototypeConfig.ULTIMATE_CAST_DIRECTION_TOWARD_SPAWN:
+		var route_points := PrototypeConfig.get_route_points(
+			&"formation_center",
+			LOGICAL_BATTLEFIELD_SIZE
+		)
+		if route_points.size() >= 2:
+			var spawn_delta: float = float(route_points[0].x) \
+				- float(route_points[route_points.size() - 1].x)
+			if absf(spawn_delta) > 0.0001:
+				return signf(spawn_delta)
+	return 1.0
+
+
+func is_ultimate_enemy_target_legal(
+	character,
+	enemy,
+	pointer_logic: Vector2
+) -> bool:
+	if (
+		not is_instance_valid(enemy)
+		or enemy.is_dead
+		or enemy.settlement_completed
+	):
+		return false
+	var definition: Dictionary = character.ultimate_definition
+	return (
+		character.position.distance_to(enemy.position)
+			<= float(definition.get("cast_range", 0.0)) + 0.0001
+		and pointer_logic.distance_to(enemy.position)
+			<= float(definition.get("snap_radius", 0.0)) + 0.0001
+	)
+
+
+func pick_ultimate_enemy_target(character, pointer_logic: Vector2):
+	var candidates: Array = []
+	for enemy in active_enemies.values():
+		if is_ultimate_enemy_target_legal(character, enemy, pointer_logic):
+			candidates.append(enemy)
+	candidates.sort_custom(func(left, right):
+		var left_distance: float = left.position.distance_squared_to(pointer_logic)
+		var right_distance: float = right.position.distance_squared_to(pointer_logic)
+		if absf(left_distance - right_distance) > 0.0001:
+			return left_distance < right_distance
+		return String(left.runtime_id) < String(right.runtime_id)
+	)
+	return candidates[0] if not candidates.is_empty() else null
+
+
+func get_ultimate_damage_targets(center: Vector2, radius: float) -> Array:
+	var targets: Array = []
+	for enemy in active_enemies.values():
+		if (
+			is_instance_valid(enemy)
+			and not enemy.is_dead
+			and not enemy.settlement_completed
+			and get_ultimate_effect_distance(center, enemy.position)
+				<= radius + 0.0001
+		):
+			targets.append(enemy)
+	targets.sort_custom(func(left, right):
+		return String(left.runtime_id) < String(right.runtime_id)
+	)
+	return targets
+
+
+func get_ultimate_heal_targets(center: Vector2, radius: float) -> Array:
+	var targets: Array = []
+	for character_id: StringName in PrototypeConfig.get_character_ids():
+		var character = character_nodes.get(character_id)
+		if (
+			is_instance_valid(character)
+			and character.is_deployed()
+			and character.is_alive
+			and character.current_health < character.max_health
+			and get_ultimate_effect_distance(center, character.position)
+				<= radius + 0.0001
+		):
+			targets.append(character)
+	return targets
+
+
+func build_ultimate_preview(
+	character,
+	target_logic: Vector2,
+	valid: bool
+) -> Dictionary:
+	var definition: Dictionary = character.ultimate_definition
+	var effect_radius := float(definition.get(
+		"effect_radius",
+		definition.get("snap_radius", 0.0)
+	))
+	var target_type := StringName(definition.get("target_type", &"POSITION"))
+	var cast_polygon := PackedVector2Array()
+	var area_points := PackedVector2Array()
+	if target_type == &"POSITION":
+		cast_polygon = get_screen_rect_points(get_ultimate_cast_rect(character))
+		area_points = get_mapped_circle_points(target_logic, effect_radius)
+	return {
+		"character_id": StringName(character.character_id),
+		"ultimate_id": StringName(definition.get("ultimate_id", &"")),
+		"valid": valid,
+		"color": definition.get("color", Color.WHITE),
+		"origin": logic_to_screen_position(character.position),
+		"target": logic_to_screen_position(target_logic),
+		"cast_points": PackedVector2Array(),
+		"cast_polygon": cast_polygon,
+		"cast_rect_logic": get_ultimate_cast_rect(character),
+		"area_points": area_points,
+		"draw_line": character.role_id == &"hunter",
+		"target_enemy_id": ultimate_target_enemy_id,
+	}
+
+
+func get_mapped_circle_points(
+	logic_center: Vector2,
+	logic_radius: float,
+	segments := 64
+) -> PackedVector2Array:
+	var points := PackedVector2Array()
+	if logic_radius <= 0.0:
+		return points
+	var screen_center := logic_to_screen_position(logic_center)
+	var screen_radius := logic_radius * uniform_visual_scale
+	for index in range(segments + 1):
+		var angle := TAU * float(index) / float(segments)
+		points.append(
+			screen_center
+				+ Vector2(cos(angle), sin(angle)) * screen_radius
+		)
+	return points
+
+
+func get_screen_rect_points(logic_rect: Rect2) -> PackedVector2Array:
+	var points := PackedVector2Array()
+	if logic_rect.size.x <= 0.0 or logic_rect.size.y <= 0.0:
+		return points
+	for corner in [
+		logic_rect.position,
+		Vector2(logic_rect.end.x, logic_rect.position.y),
+		logic_rect.end,
+		Vector2(logic_rect.position.x, logic_rect.end.y),
+		logic_rect.position,
+	]:
+		points.append(logic_to_screen_position(corner))
+	return points
+
+
+func get_ultimate_effect_distance(first: Vector2, second: Vector2) -> float:
+	var safe_visual_scale := maxf(uniform_visual_scale, 0.0001)
+	return logic_to_screen_position(first).distance_to(
+		logic_to_screen_position(second)
+	) / safe_visual_scale
+
+
+func apply_character_ultimate(character, target_logic: Vector2) -> Dictionary:
+	var definition: Dictionary = character.ultimate_definition
+	var role_id: StringName = character.role_id
+	var result := {
+		"hit_count": 0,
+		"damage": 0,
+		"kill_count": 0,
+		"stun_count": 0,
+		"healed_character_count": 0,
+		"healing": 0,
+		"target_ids": [],
+	}
+	var processed_ids: Dictionary = {}
+	if role_id == &"hunter":
+		var enemy = active_enemies.get(ultimate_target_enemy_id)
+		if is_instance_valid(enemy):
+			apply_ultimate_damage_to_enemy(
+				enemy,
+				int(definition.get("damage", 0)),
+				StringName(definition.get("damage_source_type", &"RANGED")),
+				result,
+				processed_ids
+			)
+	elif role_id in [&"guard", &"mage"]:
+		var radius := float(definition.get("effect_radius", 0.0))
+		for enemy in get_ultimate_damage_targets(target_logic, radius):
+			apply_ultimate_damage_to_enemy(
+				enemy,
+				int(definition.get("damage", 0)),
+				StringName(definition.get("damage_source_type", &"UNSPECIFIED")),
+				result,
+				processed_ids
+			)
+			if (
+				role_id == &"guard"
+				and is_instance_valid(enemy)
+				and not enemy.is_dead
+				and enemy.apply_stun(float(definition.get("stun_duration", 0.0))) > 0.0
+			):
+				result.stun_count += 1
+	elif role_id == &"doctor":
+		var heal_targets := get_ultimate_heal_targets(
+			target_logic,
+			float(definition.get("effect_radius", 0.0))
+		)
+		for target_character in heal_targets:
+			var healed := int(target_character.receive_healing(
+				int(definition.get("healing", 0))
+			))
+			if healed <= 0:
+				continue
+			result.healed_character_count += 1
+			result.healing += healed
+			result.target_ids.append(StringName(target_character.character_id))
+	spawn_ultimate_effect_visual(character, target_logic)
+	return result
+
+
+func apply_ultimate_damage_to_enemy(
+	enemy,
+	damage: int,
+	damage_source_type: StringName,
+	result: Dictionary,
+	processed_ids: Dictionary
+) -> void:
+	if not is_instance_valid(enemy):
+		return
+	var enemy_id := StringName(enemy.runtime_id)
+	if processed_ids.has(enemy_id):
+		ultimate_duplicate_settlement_count += 1
+		return
+	processed_ids[enemy_id] = true
+	var was_alive: bool = not enemy.is_dead and not enemy.settlement_completed
+	var applied := int(enemy.take_damage(maxi(0, damage), damage_source_type))
+	if applied <= 0:
+		return
+	result.hit_count += 1
+	result.damage += applied
+	result.target_ids.append(enemy_id)
+	if was_alive and enemy.is_dead:
+		result.kill_count += 1
+
+
+func spawn_ultimate_effect_visual(character, target_logic: Vector2) -> void:
+	if not is_instance_valid(ultimate_overlay):
+		return
+	var definition: Dictionary = character.ultimate_definition
+	if character.role_id == &"hunter":
+		spawn_attack_visual({
+			"type": &"attack",
+			"source_id": StringName(character.character_id),
+			"target_id": ultimate_target_enemy_id,
+			"attack_sequence_id": 100000 + ultimate_release_sequence,
+			"origin_position": character.position,
+			"target_position": target_logic,
+			"role_id": &"hunter",
+			"damage_source_type": &"RANGED",
+		})
+	var radius := float(definition.get(
+		"effect_radius",
+		definition.get("snap_radius", 24.0)
+	))
+	ultimate_overlay.spawn_effect(
+		StringName(definition.get("ultimate_id", &"")),
+		logic_to_screen_position(target_logic),
+		get_mapped_circle_points(target_logic, radius),
+		definition.get("color", Color.WHITE),
+		0.32 if character.role_id == &"hunter" else 0.48
+	)
+
+
+func record_ultimate_release(
+	character,
+	target_logic: Vector2,
+	result: Dictionary
+) -> void:
+	var character_id := StringName(character.character_id)
+	var stats: Dictionary = ultimate_stats_by_character.get(character_id, {}).duplicate(true)
+	for key in [
+		"hit_count", "damage", "kill_count", "stun_count",
+		"healed_character_count", "healing",
+	]:
+		stats[key] = int(stats.get(key, 0)) + int(result.get(key, 0))
+	stats["release_count"] = int(stats.get("release_count", 0)) + 1
+	ultimate_stats_by_character[character_id] = stats
+	ultimate_release_events.append({
+		"time": snappedf(battle_elapsed, 0.001),
+		"kind": &"RELEASED",
+		"release_sequence": ultimate_release_sequence,
+		"character_id": character_id,
+		"ultimate_id": StringName(character.ultimate_definition.get(
+			"ultimate_id", &""
+		)),
+		"target_position": target_logic,
+		"target_ids": Array(result.get("target_ids", [])).duplicate(),
+		"hit_count": int(result.get("hit_count", 0)),
+		"damage": int(result.get("damage", 0)),
+		"kill_count": int(result.get("kill_count", 0)),
+		"stun_count": int(result.get("stun_count", 0)),
+		"healed_character_count": int(result.get("healed_character_count", 0)),
+		"healing": int(result.get("healing", 0)),
+	})
+
+
+func advance_ultimate_runtime(delta: float) -> void:
+	if not is_character_ultimate_enabled():
+		return
+	for character in character_nodes.values():
+		if is_instance_valid(character):
+			character.advance_ultimate_energy(
+				delta,
+				battle_state == BattleState.RUNNING,
+				battle_elapsed
+			)
+	if is_instance_valid(ultimate_overlay):
+		ultimate_overlay.advance(delta)
+
+
+func grant_character_ultimate_event(
+	character_id: StringName,
+	event_type: StringName
+) -> float:
+	if not is_character_ultimate_enabled() or battle_state != BattleState.RUNNING:
+		return 0.0
+	var character = character_nodes.get(character_id)
+	if not is_instance_valid(character):
+		return 0.0
+	return float(character.grant_ultimate_event_energy(
+		event_type,
+		battle_elapsed,
+		true
+	))
 
 
 func configure_wave_director() -> bool:
@@ -711,6 +1474,7 @@ func start_battle() -> bool:
 	clear_active_enemies()
 	reset_character_combat_states()
 	apply_character_contact_runtime_state()
+	apply_character_ultimate_runtime_state()
 	village_durability = PrototypeConfig.VILLAGE_MAX_DURABILITY
 	rebuild_spawn_plan()
 	spawn_index = 0
@@ -733,6 +1497,7 @@ func start_battle() -> bool:
 	character_attack_event_count = 0
 	healing_event_count = 0
 	reset_character_contact_statistics()
+	reset_ultimate_statistics()
 	formation_damage_reduction_event_count = 0
 	formation_damage_prevented_total = 0
 	formation_damage_reduction_events_by_profile.clear()
@@ -762,9 +1527,11 @@ func start_battle() -> bool:
 
 func restart_battle() -> void:
 	run_sequence += 1
+	cancel_ultimate_targeting(&"RESTART", false)
 	clear_active_enemies()
 	reset_character_combat_states()
 	apply_character_contact_runtime_state()
+	apply_character_ultimate_runtime_state()
 	battle_state = BattleState.READY
 	village_durability = PrototypeConfig.VILLAGE_MAX_DURABILITY
 	rebuild_spawn_plan()
@@ -788,6 +1555,7 @@ func restart_battle() -> void:
 	character_attack_event_count = 0
 	healing_event_count = 0
 	reset_character_contact_statistics()
+	reset_ultimate_statistics()
 	formation_damage_reduction_event_count = 0
 	formation_damage_prevented_total = 0
 	formation_damage_reduction_events_by_profile.clear()
@@ -819,6 +1587,7 @@ func simulate_step(delta: float) -> void:
 		return
 	var safe_delta := maxf(0.0, delta)
 	battle_elapsed += safe_delta
+	advance_ultimate_runtime(safe_delta)
 	for character in character_nodes.values():
 		if is_instance_valid(character):
 			character.tick_contact_visual(safe_delta)
@@ -1291,8 +2060,21 @@ func simulate_character_actions(delta: float) -> void:
 			continue
 		if StringName(action.get("type", &"")) == &"heal":
 			healing_event_count += 1
+			grant_character_ultimate_event(
+				StringName(action.get("source_id", &"")),
+				&"AUTO_HEAL"
+			)
 		else:
 			character_attack_event_count += 1
+			grant_character_ultimate_event(
+				StringName(action.get("source_id", &"")),
+				&"NORMAL_ATTACK_HIT"
+			)
+			if bool(action.get("completed_kill", false)):
+				grant_character_ultimate_event(
+					StringName(action.get("source_id", &"")),
+					&"NORMAL_ATTACK_KILL"
+				)
 			spawn_attack_visual(action)
 			if battle_state != BattleState.RUNNING:
 				clear_attack_visuals()
@@ -1405,6 +2187,7 @@ func handle_enemy_attack(
 	var applied := int(character.take_damage(maxi(0, damage)))
 	if applied > 0:
 		enemy_attack_event_count += 1
+		grant_character_ultimate_event(character_id, &"DAMAGE_TAKEN")
 		if contact_attack_valid:
 			record_character_contact_event(
 				&"ATTACK_RESOLVED",
@@ -1423,6 +2206,8 @@ func handle_character_death(character_id: StringName) -> void:
 	var character = character_nodes.get(character_id)
 	if not is_instance_valid(character):
 		return
+	if ultimate_targeting_character_id == character_id:
+		cancel_ultimate_targeting(&"CHARACTER_INCAPACITATED", true)
 	var blocked_ids: Array[StringName] = character.blocked_enemy_ids.duplicate()
 	for enemy_id: StringName in blocked_ids:
 		var enemy = active_enemies.get(enemy_id)
@@ -1520,6 +2305,8 @@ func remove_enemy(enemy_id: StringName) -> void:
 
 func clear_active_enemies() -> void:
 	clear_attack_visuals()
+	if is_instance_valid(ultimate_overlay):
+		ultimate_overlay.clear_all()
 	if is_instance_valid(formation_manager):
 		formation_manager.clear_all_formations(active_enemies)
 	for enemy in active_enemies.values():
@@ -1574,7 +2361,11 @@ func finish_victory() -> void:
 	if battle_state != BattleState.RUNNING or village_durability <= 0:
 		return
 	battle_state = BattleState.VICTORY
+	clear_character_ultimate_event_throttles()
+	cancel_ultimate_targeting(&"BATTLE_END", false)
 	clear_attack_visuals()
+	if is_instance_valid(ultimate_overlay):
+		ultimate_overlay.clear_all()
 	clear_character_contact_transient_visuals()
 	command_controller.handle_battle_end(&"BATTLE_END")
 	battle_finish_count += 1
@@ -1586,15 +2377,27 @@ func finish_defeat() -> void:
 	if battle_state != BattleState.RUNNING:
 		return
 	battle_state = BattleState.DEFEAT
+	clear_character_ultimate_event_throttles()
+	cancel_ultimate_targeting(&"BATTLE_END", false)
 	if is_instance_valid(wave_director):
 		wave_director.stop()
 	command_controller.handle_battle_end(&"BATTLE_END")
 	village_durability = 0
 	battle_finish_count += 1
 	clear_active_enemies()
+	if is_instance_valid(ultimate_overlay):
+		ultimate_overlay.clear_all()
 	clear_character_contact_transient_visuals()
 	update_ui()
 	battle_finished.emit(&"defeat")
+
+
+func clear_character_ultimate_event_throttles() -> void:
+	if not is_character_ultimate_enabled():
+		return
+	for character in character_nodes.values():
+		if is_instance_valid(character):
+			character.clear_ultimate_event_throttle()
 
 
 func on_battlefield_resized() -> void:
@@ -1723,7 +2526,11 @@ func is_enemy_pick_before(candidate, current_best) -> bool:
 
 
 func update_hover_target() -> void:
-	if not is_node_ready() or battle_state != BattleState.RUNNING:
+	if (
+		not is_node_ready()
+		or battle_state != BattleState.RUNNING
+		or ultimate_targeting_character_id != &""
+	):
 		command_controller.set_hover_target(&"")
 		return
 	var mouse_position := get_viewport().get_mouse_position()
@@ -1911,6 +2718,22 @@ func get_battle_snapshot() -> Dictionary:
 		"character_contact_target_switch_count":
 			character_contact_target_switch_count,
 		"character_contact_events": character_contact_events.duplicate(true),
+		"character_ultimate_enabled": is_character_ultimate_enabled(),
+		"ultimate_targeting_character_id": ultimate_targeting_character_id,
+		"ultimate_target_enemy_id": ultimate_target_enemy_id,
+		"ultimate_preview_valid": ultimate_preview_valid,
+		"ultimate_release_sequence": ultimate_release_sequence,
+		"ultimate_release_events": ultimate_release_events.duplicate(true),
+		"ultimate_stats_by_character": ultimate_stats_by_character.duplicate(true),
+		"ultimate_cancel_count": ultimate_cancel_count,
+		"ultimate_invalid_release_count": ultimate_invalid_release_count,
+		"ultimate_rejected_start_count": ultimate_rejected_start_count,
+		"ultimate_duplicate_settlement_count": ultimate_duplicate_settlement_count,
+		"ultimate_ui_exists": is_instance_valid(ultimate_bar),
+		"ultimate_overlay": (
+			ultimate_overlay.get_debug_snapshot()
+			if is_instance_valid(ultimate_overlay) else {}
+		),
 		"formation_damage_reduction_event_count":
 			formation_damage_reduction_event_count,
 		"formation_damage_prevented_total": formation_damage_prevented_total,
@@ -2109,6 +2932,14 @@ func update_ui() -> void:
 			int(round(float(command.get("formation_damage_reduction", 0.0)) * 100.0)),
 			compact_waiting,
 		]
+	if ultimate_targeting_character_id != &"":
+		var targeting_character = character_nodes.get(ultimate_targeting_character_id)
+		if is_instance_valid(targeting_character):
+			compact_command_label.text = "大招瞄准：%s｜%s｜松开释放，右键或 Esc 取消" % [
+				targeting_character.display_name,
+				"合法目标" if ultimate_preview_valid else "当前位置无效",
+			]
+	update_ultimate_ui()
 	start_button.disabled = battle_state != BattleState.READY
 	scenario_option.disabled = battle_state != BattleState.READY
 	refresh_deployment_visuals()
