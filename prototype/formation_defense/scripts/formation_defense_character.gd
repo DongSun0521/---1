@@ -4,10 +4,12 @@ signal character_died(character_id: StringName)
 
 const BODY_RADIUS := 17.0
 const HEALTH_BAR_WIDTH := 44.0
+const ROLE_LABEL_RECT := Rect2(-30.0, 25.0, 60.0, 18.0)
 
 var character_id: StringName = &""
 var role_id: StringName = &""
 var display_name := ""
+var role_label_visible := false
 var deployed_slot_id: StringName = &""
 var lane_id: StringName = &""
 var max_health := 1
@@ -314,6 +316,23 @@ func set_selected(selected: bool) -> void:
 	queue_redraw()
 
 
+func set_action_range(new_action_range: float) -> void:
+	action_range = maxf(0.0, new_action_range)
+	queue_redraw()
+
+
+func set_role_label_visible(visible: bool) -> void:
+	role_label_visible = visible
+	queue_redraw()
+
+
+func get_role_label_color() -> Color:
+	return (
+		Color(0.58, 0.62, 0.70, 0.92)
+		if not is_alive else Color(0.94, 0.97, 1.0, 1.0)
+	)
+
+
 func add_blocked_enemy(enemy_id: StringName) -> bool:
 	if role_id != &"guard" or not is_alive:
 		return false
@@ -446,6 +465,10 @@ func choose_enemy_target(active_enemies: Array, command_controller = null):
 	return legal_candidates[0] if not legal_candidates.is_empty() else null
 
 
+func is_position_in_action_range(target_position: Vector2) -> bool:
+	return position.distance_to(target_position) <= action_range + 0.0001
+
+
 func get_legal_enemy_candidates(active_enemies: Array) -> Array:
 	var candidates: Array = []
 	for enemy in active_enemies:
@@ -462,7 +485,7 @@ func get_legal_enemy_candidates(active_enemies: Array) -> Array:
 				or not blocked_enemy_ids.has(StringName(enemy.runtime_id))
 			):
 				continue
-		elif position.distance_to(enemy.position) > action_range:
+		elif not is_position_in_action_range(enemy.position):
 			continue
 		candidates.append(enemy)
 	candidates.sort_custom(func(left, right): return is_better_enemy_target(left, right))
@@ -519,6 +542,9 @@ func get_runtime_snapshot() -> Dictionary:
 		"character_id": character_id,
 		"role_id": role_id,
 		"display_name": display_name,
+		"role_label_visible": role_label_visible,
+		"role_label_rect": ROLE_LABEL_RECT,
+		"role_label_color": get_role_label_color(),
 		"deployed_slot_id": deployed_slot_id,
 		"lane_id": lane_id,
 		"max_health": max_health,
@@ -608,10 +634,32 @@ func _draw() -> void:
 			Rect2(health_origin, Vector2(HEALTH_BAR_WIDTH * health_ratio, 6.0)),
 			Color(0.36, 0.94, 0.55, 1.0)
 		)
+	if role_label_visible:
+		var role_label_color := get_role_label_color()
+		var role_label_position := Vector2(ROLE_LABEL_RECT.position.x, 39.0)
+		draw_string_outline(
+			ThemeDB.fallback_font,
+			role_label_position,
+			display_name,
+			HORIZONTAL_ALIGNMENT_CENTER,
+			ROLE_LABEL_RECT.size.x,
+			13,
+			3,
+			Color(0.02, 0.04, 0.07, 0.96)
+		)
+		draw_string(
+			ThemeDB.fallback_font,
+			role_label_position,
+			display_name,
+			HORIZONTAL_ALIGNMENT_CENTER,
+			ROLE_LABEL_RECT.size.x,
+			13,
+			role_label_color
+		)
 	if contact_combat_enabled and is_incapacitated:
 		draw_string(
 			ThemeDB.fallback_font,
-			Vector2(-22.0, 38.0),
+			Vector2(-22.0, 56.0 if role_label_visible else 38.0),
 			"倒下",
 			HORIZONTAL_ALIGNMENT_CENTER,
 			44.0,

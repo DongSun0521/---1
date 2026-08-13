@@ -378,6 +378,12 @@ func build_wave_events(wave: Dictionary, wave_index: int) -> Array[Dictionary]:
 					"enemy_profile_id": profile_id,
 					"max_health": int(group.get("max_health", profile_overrides.get("max_health", 0))),
 					"move_speed": float(group.get("move_speed", profile_overrides.get("move_speed", 0.0))),
+					"display_name": String(
+						group.get("display_name", profile_overrides.get("display_name", ""))
+					),
+					"type_marker": StringName(
+						group.get("type_marker", profile_overrides.get("type_marker", &""))
+					),
 					"allowed_spawn_points": group.get("allowed_spawn_points", []).duplicate(),
 					"allowed_lanes": group.get("allowed_lanes", []).duplicate(),
 					"selection_mode": StringName(group.get("selection_mode", &"random")),
@@ -616,6 +622,10 @@ static func validate_battle_config(
 		errors.append("formation_completion_tolerance must be greater than zero")
 	if config.has("formation_duration_multiplier") and float(config.formation_duration_multiplier) < 0.0:
 		errors.append("formation_duration_multiplier must be non-negative")
+	if config.has("formation_a_spacing_scale") and float(config.formation_a_spacing_scale) <= 0.0:
+		errors.append("formation_a_spacing_scale must be greater than zero")
+	if config.has("formation_b_spacing_scale") and float(config.formation_b_spacing_scale) <= 0.0:
+		errors.append("formation_b_spacing_scale must be greater than zero")
 	for raw_profile_id in Dictionary(config.get("enemy_profile_overrides", {})).keys():
 		var profile_id := StringName(raw_profile_id)
 		var profile: Dictionary = config.enemy_profile_overrides[raw_profile_id]

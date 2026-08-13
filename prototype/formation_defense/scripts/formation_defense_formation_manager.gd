@@ -20,6 +20,8 @@ var formation_approach_speed := PrototypeConfig.FORMATION_SLOT_MOVE_SPEED
 var formation_completion_tolerance := PrototypeConfig.FORMATION_SLOT_TOLERANCE
 var formation_duration_multiplier := 1.0
 var b_formation_prepare_duration := PrototypeConfig.DEFAULT_B_FORMATION_PREPARE_DURATION
+var formation_a_spacing_scale := 1.0
+var formation_b_spacing_scale := 1.0
 
 var completed_a_count := 0
 var completed_b_count := 0
@@ -113,12 +115,16 @@ func set_runtime_formation_tuning(
 	approach_speed: float,
 	completion_tolerance: float,
 	duration_multiplier: float,
-	prepare_duration: float = PrototypeConfig.DEFAULT_B_FORMATION_PREPARE_DURATION
+	prepare_duration: float = PrototypeConfig.DEFAULT_B_FORMATION_PREPARE_DURATION,
+	a_spacing_scale: float = 1.0,
+	b_spacing_scale: float = 1.0
 ) -> void:
 	formation_approach_speed = maxf(1.0, approach_speed)
 	formation_completion_tolerance = maxf(1.0, completion_tolerance)
 	formation_duration_multiplier = maxf(0.0, duration_multiplier)
 	b_formation_prepare_duration = maxf(0.0, prepare_duration)
+	formation_a_spacing_scale = maxf(0.01, a_spacing_scale)
+	formation_b_spacing_scale = maxf(0.01, b_spacing_scale)
 
 
 func update_formations(delta: float, active_enemies: Dictionary) -> void:
@@ -400,8 +406,12 @@ func create_forming_a(first, second, active_enemies: Dictionary):
 		(first.position + second.position) * 0.5
 	)
 	var slot_assignments := {
-		members[0]: Vector2(0.0, -PrototypeConfig.A_SLOT_GAP_Y * 0.5),
-		members[1]: Vector2(0.0, PrototypeConfig.A_SLOT_GAP_Y * 0.5),
+		members[0]: Vector2(
+			0.0, -PrototypeConfig.A_SLOT_GAP_Y * formation_a_spacing_scale * 0.5
+		),
+		members[1]: Vector2(
+			0.0, PrototypeConfig.A_SLOT_GAP_Y * formation_a_spacing_scale * 0.5
+		),
 	}
 	var group = PrototypeFormationGroup.new()
 	group.configure(
@@ -451,8 +461,8 @@ func create_forming_b(first_a, second_a, active_enemies: Dictionary):
 	var center: Variant = get_members_center(all_members, active_enemies)
 	if center == null:
 		return null
-	var half_x := PrototypeConfig.B_SLOT_GAP_X * 0.5
-	var half_y := PrototypeConfig.B_SLOT_GAP_Y * 0.5
+	var half_x := PrototypeConfig.B_SLOT_GAP_X * formation_b_spacing_scale * 0.5
+	var half_y := PrototypeConfig.B_SLOT_GAP_Y * formation_b_spacing_scale * 0.5
 	var slot_assignments := {
 		all_members[0]: Vector2(-half_x, -half_y),
 		all_members[1]: Vector2(half_x, -half_y),
@@ -1127,8 +1137,12 @@ func create_a_slot_assignments(
 	if members.size() != 2:
 		return {}
 	return {
-		members[0]: Vector2(0.0, -PrototypeConfig.A_SLOT_GAP_Y * 0.5),
-		members[1]: Vector2(0.0, PrototypeConfig.A_SLOT_GAP_Y * 0.5),
+		members[0]: Vector2(
+			0.0, -PrototypeConfig.A_SLOT_GAP_Y * formation_a_spacing_scale * 0.5
+		),
+		members[1]: Vector2(
+			0.0, PrototypeConfig.A_SLOT_GAP_Y * formation_a_spacing_scale * 0.5
+		),
 	}
 
 
@@ -1457,6 +1471,11 @@ func get_stats_snapshot(active_enemies: Dictionary) -> Dictionary:
 		"formation_approach_speed": formation_approach_speed,
 		"formation_completion_tolerance": formation_completion_tolerance,
 		"b_formation_prepare_duration": b_formation_prepare_duration,
+		"formation_a_spacing_scale": formation_a_spacing_scale,
+		"formation_b_spacing_scale": formation_b_spacing_scale,
+		"formation_a_slot_gap": PrototypeConfig.A_SLOT_GAP_Y * formation_a_spacing_scale,
+		"formation_b_slot_gap_x": PrototypeConfig.B_SLOT_GAP_X * formation_b_spacing_scale,
+		"formation_b_slot_gap_y": PrototypeConfig.B_SLOT_GAP_Y * formation_b_spacing_scale,
 	}
 
 

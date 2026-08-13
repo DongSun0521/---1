@@ -12,8 +12,12 @@ const SPAWN_INTERVAL_SECONDS := 1.1
 const DEFAULT_BATTLEFIELD_SIZE := Vector2(1600.0, 560.0)
 const DEFAULT_CHARACTER_CONTACT_COMBAT_ENABLED := false
 const DEFAULT_CHARACTER_ULTIMATE_ENABLED := false
+const DEFAULT_CHARACTER_ROLE_LABELS_ENABLED := false
 const ULTIMATE_CAST_AREA_FORWARD_RECT: StringName = &"FORWARD_RECT"
 const ULTIMATE_CAST_DIRECTION_TOWARD_SPAWN: StringName = &"TOWARD_ENEMY_SPAWN"
+const FULL_COMBAT_AREA_NORMALIZED_RECT := Rect2(0.08, 0.10, 0.84, 0.80)
+const FINAL_HUNTER_ACTION_RANGE := 500.0
+const FINAL_MAGE_ACTION_RANGE := 450.0
 
 const DAMAGE_SOURCE_MELEE: StringName = &"MELEE"
 const DAMAGE_SOURCE_RANGED: StringName = &"RANGED"
@@ -683,6 +687,12 @@ const CONTACT_VALIDATION_DEPLOYMENT := {
 const ULTIMATE_VALIDATION_DEPLOYMENT := {
 	&"guard": &"middle_c4",
 	&"hunter": &"top_c2",
+	&"mage": &"bottom_c2",
+	&"doctor": &"middle_c2",
+}
+const THREE_ARCHETYPE_FULL_BATTLE_DEPLOYMENT := {
+	&"guard": &"middle_c4",
+	&"hunter": &"top_c4",
 	&"mage": &"bottom_c2",
 	&"doctor": &"middle_c2",
 }
@@ -1430,6 +1440,186 @@ const WAVE_BATTLES := {
 			},
 		],
 	},
+	&"v2_7b_three_archetype_full_battle": {
+		"battle_id": &"v2_7b_three_archetype_full_battle",
+		"display_name": "V2-7B 三类怪物综合战",
+		"random_seed": 2703,
+		"initial_countdown": 4.0,
+		"inter_wave_delay": 6.0,
+		"character_ultimate_enabled": true,
+		"character_role_labels_enabled": true,
+		"position_ultimate_cast_area_normalized_rect": FULL_COMBAT_AREA_NORMALIZED_RECT,
+		"character_action_range_overrides": {
+			&"hunter": FINAL_HUNTER_ACTION_RANGE,
+			&"mage": FINAL_MAGE_ACTION_RANGE,
+		},
+		"enemy_profile_overrides": {
+			&"formation_guard": {
+				"display_name": "护阵怪",
+				"type_marker": &"guard_shield",
+				"max_health": 137,
+				"move_speed": 33.6,
+			},
+			&"charge": {
+				"display_name": "加速怪",
+				"type_marker": &"speed_boot",
+				"max_health": 75,
+				"move_speed": 48.0,
+			},
+			&"rush_raider": {
+				"display_name": "冲锋怪",
+				"type_marker": &"rush_rocket",
+				"max_health": 137,
+				"move_speed": 33.6,
+			},
+		},
+		"formation_a_spacing_scale": 0.75,
+		"formation_b_spacing_scale": 0.68,
+		"waves": [
+			{
+				"wave_id": &"three_archetype_1",
+				"display_name": "第一波：护阵认识",
+				"subwaves": [{
+					"start_offset": 0.0,
+					"spawn_groups": [{
+						"enemy_profile_id": &"formation_guard",
+						"count": 8,
+						"spawn_interval": 0.65,
+						"allowed_spawn_points": [
+							&"spawn_upper_outer", &"spawn_upper",
+							&"spawn_center", &"spawn_lower",
+						],
+						"allowed_lanes": [
+							&"formation_upper_outer", &"formation_upper",
+							&"formation_center", &"formation_lower",
+						],
+						"selection_mode": &"round_robin",
+					}],
+				}],
+			},
+			{
+				"wave_id": &"three_archetype_2",
+				"display_name": "第二波：冲锋认识",
+				"subwaves": [{
+					"start_offset": 0.0,
+					"spawn_groups": [{
+						"enemy_profile_id": &"rush_raider",
+						"count": 8,
+						"spawn_interval": 0.85,
+						"allowed_spawn_points": [
+							&"spawn_upper_outer", &"spawn_upper", &"spawn_center",
+							&"spawn_lower", &"spawn_lower_outer",
+						],
+						"allowed_lanes": [
+							&"formation_upper_outer", &"formation_upper", &"formation_center",
+							&"formation_lower", &"formation_lower_outer",
+						],
+						"selection_mode": &"round_robin",
+					}],
+				}],
+			},
+			{
+				"wave_id": &"three_archetype_3",
+				"display_name": "第三波：加速认识",
+				"subwaves": [{
+					"start_offset": 0.0,
+					"spawn_groups": [{
+						"enemy_profile_id": &"charge",
+						"count": 8,
+						"spawn_interval": 0.65,
+						"allowed_spawn_points": [
+							&"spawn_upper_outer", &"spawn_upper",
+							&"spawn_lower", &"spawn_lower_outer",
+						],
+						"allowed_lanes": [
+							&"formation_upper_outer", &"formation_upper",
+							&"formation_lower", &"formation_lower_outer",
+						],
+						"selection_mode": &"round_robin",
+					}],
+				}],
+			},
+			{
+				"wave_id": &"three_archetype_4",
+				"display_name": "第四波：第一次混合",
+				"subwaves": [
+					{"start_offset": 0.0, "spawn_groups": [{
+						"enemy_profile_id": &"formation_guard", "count": 4,
+						"spawn_interval": 0.75,
+						"allowed_spawn_points": [&"spawn_upper", &"spawn_center"],
+						"allowed_lanes": [&"formation_upper", &"formation_center"],
+						"selection_mode": &"round_robin",
+					}]},
+					{"start_offset": 2.2, "spawn_groups": [{
+						"enemy_profile_id": &"charge", "count": 4,
+						"spawn_interval": 0.75,
+						"allowed_spawn_points": [&"spawn_center", &"spawn_lower"],
+						"allowed_lanes": [&"formation_center", &"formation_lower"],
+						"selection_mode": &"round_robin",
+					}]},
+					{"start_offset": 4.4, "spawn_groups": [{
+						"enemy_profile_id": &"rush_raider", "count": 4,
+						"spawn_interval": 0.75,
+						"allowed_spawn_points": [
+							&"spawn_upper_outer", &"spawn_upper", &"spawn_lower", &"spawn_lower_outer",
+						],
+						"allowed_lanes": [
+							&"formation_upper_outer", &"formation_upper", &"formation_lower", &"formation_lower_outer",
+						],
+						"selection_mode": &"round_robin",
+					}]},
+				],
+			},
+			{
+				"wave_id": &"three_archetype_5",
+				"display_name": "第五波：完整混合决战",
+				"subwaves": [
+					{"start_offset": 0.0, "spawn_groups": [{
+						"enemy_profile_id": &"formation_guard", "count": 4,
+						"spawn_interval": 0.75,
+						"allowed_spawn_points": [&"spawn_upper_outer", &"spawn_upper"],
+						"allowed_lanes": [&"formation_upper_outer", &"formation_upper"],
+						"selection_mode": &"round_robin",
+					}]},
+					{"start_offset": 2.2, "spawn_groups": [{
+						"enemy_profile_id": &"charge", "count": 4,
+						"spawn_interval": 0.75,
+						"allowed_spawn_points": [&"spawn_center", &"spawn_lower"],
+						"allowed_lanes": [&"formation_center", &"formation_lower"],
+						"selection_mode": &"round_robin",
+					}]},
+					{"start_offset": 4.4, "spawn_groups": [{
+						"enemy_profile_id": &"rush_raider", "count": 4,
+						"spawn_interval": 0.75,
+						"allowed_spawn_points": [&"spawn_upper", &"spawn_lower", &"spawn_lower_outer"],
+						"allowed_lanes": [&"formation_upper", &"formation_lower", &"formation_lower_outer"],
+						"selection_mode": &"round_robin",
+					}]},
+					{"start_offset": 8.5, "spawn_groups": [{
+						"enemy_profile_id": &"formation_guard", "count": 4,
+						"spawn_interval": 0.75,
+						"allowed_spawn_points": [&"spawn_center", &"spawn_lower"],
+						"allowed_lanes": [&"formation_center", &"formation_lower"],
+						"selection_mode": &"round_robin",
+					}]},
+					{"start_offset": 10.7, "spawn_groups": [{
+						"enemy_profile_id": &"charge", "count": 4,
+						"spawn_interval": 0.75,
+						"allowed_spawn_points": [&"spawn_upper_outer", &"spawn_upper"],
+						"allowed_lanes": [&"formation_upper_outer", &"formation_upper"],
+						"selection_mode": &"round_robin",
+					}]},
+					{"start_offset": 12.9, "spawn_groups": [{
+						"enemy_profile_id": &"rush_raider", "count": 4,
+						"spawn_interval": 0.75,
+						"allowed_spawn_points": [&"spawn_upper_outer", &"spawn_center", &"spawn_lower_outer"],
+						"allowed_lanes": [&"formation_upper_outer", &"formation_center", &"formation_lower_outer"],
+						"selection_mode": &"round_robin",
+					}]},
+				],
+			},
+		],
+	},
 }
 
 const SCENARIO_IDS: Array[StringName] = [
@@ -1445,6 +1635,7 @@ const SCENARIO_IDS: Array[StringName] = [
 	&"mixed_threat_validation",
 	&"character_contact_validation",
 	&"player_ultimate_validation",
+	&"three_archetype_full_battle",
 ]
 const SCENARIOS := {
 	&"survival": {
@@ -1683,6 +1874,16 @@ const SCENARIOS := {
 		"wave_battle_id": &"v2_7a_player_ultimate_validation",
 		"active_spawn_point_ids": [
 			&"spawn_upper", &"spawn_center", &"spawn_lower",
+		],
+	},
+	&"three_archetype_full_battle": {
+		"display_name": "V2-7B 三类怪物综合战",
+		"description": "五波60只：护阵、加速、冲锋三类威胁与组阵、集火和四职业大招综合验证。",
+		"formations_enabled": true,
+		"wave_battle_id": &"v2_7b_three_archetype_full_battle",
+		"active_spawn_point_ids": [
+			&"spawn_upper_outer", &"spawn_upper", &"spawn_center",
+			&"spawn_lower", &"spawn_lower_outer",
 		],
 	},
 }
@@ -2075,6 +2276,8 @@ static func get_recommended_deployment(
 		return CONTACT_VALIDATION_DEPLOYMENT.duplicate(true)
 	if scenario_id == &"player_ultimate_validation":
 		return ULTIMATE_VALIDATION_DEPLOYMENT.duplicate(true)
+	if scenario_id == &"three_archetype_full_battle":
+		return THREE_ARCHETYPE_FULL_BATTLE_DEPLOYMENT.duplicate(true)
 	return RECOMMENDED_DEPLOYMENT.duplicate(true)
 
 

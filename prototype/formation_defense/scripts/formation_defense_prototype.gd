@@ -125,6 +125,8 @@ var formation_damage_prevented_total := 0
 var formation_damage_reduction_events_by_profile: Dictionary = {}
 var formation_damage_prevented_by_profile: Dictionary = {}
 var speed_effect_observed_ids: Dictionary = {}
+var enemy_archetype_records: Dictionary = {}
+var archetype_stats_by_profile: Dictionary = {}
 var demo_control_resistance_triggered := false
 var battle_elapsed := 0.0
 var attack_visual_spawn_count := 0
@@ -165,6 +167,7 @@ func _ready() -> void:
 	setup_deployment_slots()
 	setup_character_roster()
 	apply_character_ultimate_runtime_state()
+	apply_character_role_label_runtime_state()
 	start_button.pressed.connect(start_battle)
 	restart_button.pressed.connect(restart_battle)
 	scenario_option.item_selected.connect(on_scenario_selected)
@@ -473,7 +476,8 @@ func handle_battlefield_pointer(
 	var enemy = pick_enemy_at(local_position)
 	if is_instance_valid(enemy):
 		cancel_ultimate_targeting(&"FOCUS_COMMAND", false)
-		command_controller.issue_command(StringName(enemy.runtime_id))
+		if command_controller.issue_command(StringName(enemy.runtime_id)):
+			mark_enemy_focus_commanded(StringName(enemy.runtime_id))
 		update_ui()
 		return true
 	return false
@@ -542,6 +546,8 @@ func select_scenario(scenario_id: StringName) -> bool:
 	selected_scenario_id = scenario_id
 	apply_character_contact_runtime_state()
 	apply_character_ultimate_runtime_state()
+	apply_character_action_range_runtime_state()
+	apply_character_role_label_runtime_state()
 	var option_index := find_scenario_option(scenario_id)
 	if option_index >= 0 and scenario_option.selected != option_index:
 		scenario_option.select(option_index)
@@ -640,6 +646,37 @@ func apply_character_ultimate_runtime_state() -> void:
 		ensure_ultimate_ui()
 	else:
 		destroy_ultimate_ui()
+
+
+func apply_character_action_range_runtime_state() -> void:
+	var overrides: Dictionary = get_selected_wave_battle_config().get(
+		"character_action_range_overrides",
+		{}
+	)
+	for character_id: StringName in PrototypeConfig.get_character_ids():
+		var character = character_nodes.get(character_id)
+		if not is_instance_valid(character):
+			continue
+		var definition := PrototypeConfig.get_character_definition(character_id)
+		character.set_action_range(float(
+			overrides.get(character_id, definition.get("action_range", 0.0))
+		))
+
+
+func are_character_role_labels_enabled() -> bool:
+	return bool(
+		get_selected_wave_battle_config().get(
+			"character_role_labels_enabled",
+			PrototypeConfig.DEFAULT_CHARACTER_ROLE_LABELS_ENABLED
+		)
+	)
+
+
+func apply_character_role_label_runtime_state() -> void:
+	var enabled := are_character_role_labels_enabled()
+	for character in character_nodes.values():
+		if is_instance_valid(character):
+			character.set_role_label_visible(enabled)
 
 
 func reset_ultimate_statistics() -> void:
@@ -962,6 +999,9 @@ func is_position_ultimate_target_legal(character, target: Vector2) -> bool:
 	var battlefield_rect := Rect2(Vector2.ZERO, LOGICAL_BATTLEFIELD_SIZE)
 	if not battlefield_rect.has_point(target):
 		return false
+	var configured_cast_rect := get_configured_position_ultimate_cast_rect()
+	if configured_cast_rect.size.x > 0.0 and configured_cast_rect.size.y > 0.0:
+		return configured_cast_rect.has_point(target)
 	if StringName(character.ultimate_definition.get("cast_area_shape", &"")) \
 			== PrototypeConfig.ULTIMATE_CAST_AREA_FORWARD_RECT:
 		return get_ultimate_cast_rect(character).has_point(target)
@@ -975,6 +1015,10 @@ func get_ultimate_cast_rect(character) -> Rect2:
 	if not is_instance_valid(character):
 		return Rect2()
 	var definition: Dictionary = character.ultimate_definition
+	if StringName(definition.get("target_type", &"POSITION")) == &"POSITION":
+		var configured_cast_rect := get_configured_position_ultimate_cast_rect()
+		if configured_cast_rect.size.x > 0.0 and configured_cast_rect.size.y > 0.0:
+			return configured_cast_rect
 	if StringName(definition.get("cast_area_shape", &"")) \
 			!= PrototypeConfig.ULTIMATE_CAST_AREA_FORWARD_RECT:
 		return Rect2()
@@ -992,6 +1036,23 @@ func get_ultimate_cast_rect(character) -> Rect2:
 		Vector2(left, 0.0),
 		Vector2(width, LOGICAL_BATTLEFIELD_SIZE.y)
 	).intersection(battlefield_rect)
+
+
+func get_configured_position_ultimate_cast_rect() -> Rect2:
+	var battle_config := get_selected_wave_battle_config()
+	if not battle_config.has("position_ultimate_cast_area_normalized_rect"):
+		return Rect2()
+	var normalized_rect: Rect2 = battle_config.get(
+		"position_ultimate_cast_area_normalized_rect",
+		Rect2()
+	)
+	if normalized_rect.size.x <= 0.0 or normalized_rect.size.y <= 0.0:
+		return Rect2()
+	var logical_rect := Rect2(
+		normalized_rect.position * LOGICAL_BATTLEFIELD_SIZE,
+		normalized_rect.size * LOGICAL_BATTLEFIELD_SIZE
+	)
+	return logical_rect.intersection(Rect2(Vector2.ZERO, LOGICAL_BATTLEFIELD_SIZE))
 
 
 func get_ultimate_forward_x_sign(direction: StringName) -> float:
@@ -1475,6 +1536,7 @@ func start_battle() -> bool:
 	reset_character_combat_states()
 	apply_character_contact_runtime_state()
 	apply_character_ultimate_runtime_state()
+	apply_character_role_label_runtime_state()
 	village_durability = PrototypeConfig.VILLAGE_MAX_DURABILITY
 	rebuild_spawn_plan()
 	spawn_index = 0
@@ -1503,6 +1565,7 @@ func start_battle() -> bool:
 	formation_damage_reduction_events_by_profile.clear()
 	formation_damage_prevented_by_profile.clear()
 	speed_effect_observed_ids.clear()
+	reset_archetype_statistics()
 	demo_control_resistance_triggered = false
 	battle_elapsed = 0.0
 	attack_visual_spawn_count = 0
@@ -1532,6 +1595,7 @@ func restart_battle() -> void:
 	reset_character_combat_states()
 	apply_character_contact_runtime_state()
 	apply_character_ultimate_runtime_state()
+	apply_character_role_label_runtime_state()
 	battle_state = BattleState.READY
 	village_durability = PrototypeConfig.VILLAGE_MAX_DURABILITY
 	rebuild_spawn_plan()
@@ -1561,6 +1625,7 @@ func restart_battle() -> void:
 	formation_damage_reduction_events_by_profile.clear()
 	formation_damage_prevented_by_profile.clear()
 	speed_effect_observed_ids.clear()
+	reset_archetype_statistics()
 	demo_control_resistance_triggered = false
 	battle_elapsed = 0.0
 	attack_visual_spawn_count = 0
@@ -1617,6 +1682,7 @@ func simulate_step(delta: float) -> void:
 			speed_effect_observed_ids[enemy.runtime_id] = true
 	if battle_state == BattleState.RUNNING:
 		formation_manager.update_formations(safe_delta, active_enemies)
+		record_archetype_zone_entries()
 		run_formation_demo_control_resistance()
 		command_controller.process_command(safe_delta)
 	update_enemy_blocking()
@@ -1697,6 +1763,12 @@ func handle_wave_spawn_requested(spawn_event: Dictionary) -> void:
 	var configured_move_speed := float(spawn_event.get("move_speed", 0.0))
 	if configured_move_speed > 0.0:
 		spawn_overrides["move_speed"] = configured_move_speed
+	var configured_display_name := String(spawn_event.get("display_name", ""))
+	if not configured_display_name.is_empty():
+		spawn_overrides["display_name"] = configured_display_name
+	var configured_type_marker := StringName(spawn_event.get("type_marker", &""))
+	if configured_type_marker != &"":
+		spawn_overrides["type_marker"] = configured_type_marker
 	var enemy = spawn_enemy_for_route(
 		StringName(spawn_event.get("route_id", &"")),
 		StringName(spawn_event.get("enemy_profile_id", &"charge")),
@@ -1797,8 +1869,14 @@ func spawn_enemy_for_route(
 		route_group_id,
 		blocking_lane_id,
 		formation_route_index,
-		String(monster_definition.get("display_name", String(monster_type))),
-		StringName(monster_definition.get("type_marker", &"")),
+		String(overrides.get(
+			"display_name",
+			monster_definition.get("display_name", String(monster_type))
+		)),
+		StringName(overrides.get(
+			"type_marker",
+			monster_definition.get("type_marker", &"")
+		)),
 		bool(monster_definition.get("formation_can_participate", true)),
 		monster_definition,
 		contact_config
@@ -1821,6 +1899,7 @@ func spawn_enemy_for_route(
 	generated_by_monster_type[monster_type] = int(
 		generated_by_monster_type.get(monster_type, 0)
 	) + 1
+	record_archetype_spawn(enemy)
 	return enemy
 
 
@@ -2236,12 +2315,141 @@ func handle_character_death(character_id: StringName) -> void:
 	update_ui()
 
 
+func reset_archetype_statistics() -> void:
+	enemy_archetype_records.clear()
+	archetype_stats_by_profile.clear()
+	for profile_id: StringName in PrototypeConfig.get_monster_type_ids():
+		archetype_stats_by_profile[profile_id] = create_empty_archetype_stats()
+
+
+func create_empty_archetype_stats() -> Dictionary:
+	return {
+		"generated": 0,
+		"entered_a_alive": 0,
+		"entered_a_unfocused": 0,
+		"killed_before_a": 0,
+		"focus_killed_before_a": 0,
+		"killed": 0,
+		"leaked": 0,
+		"focus_commands_received": 0,
+		"rush_prepare_count": 0,
+		"rush_started_count": 0,
+	}
+
+
+func get_archetype_stats(profile_id: StringName) -> Dictionary:
+	if not archetype_stats_by_profile.has(profile_id):
+		archetype_stats_by_profile[profile_id] = create_empty_archetype_stats()
+	return archetype_stats_by_profile[profile_id]
+
+
+func record_archetype_spawn(enemy) -> void:
+	if not is_instance_valid(enemy):
+		return
+	var enemy_id := StringName(enemy.runtime_id)
+	var profile_id := StringName(enemy.monster_type)
+	enemy_archetype_records[enemy_id] = {
+		"profile_id": profile_id,
+		"entered_a_alive": false,
+		"focus_command_count": 0,
+		"rush_prepare_observed": false,
+		"rush_started_observed": false,
+		"settlement": &"",
+	}
+	var stats := get_archetype_stats(profile_id)
+	stats.generated = int(stats.get("generated", 0)) + 1
+
+
+func mark_enemy_focus_commanded(enemy_id: StringName) -> void:
+	if not enemy_archetype_records.has(enemy_id):
+		return
+	var record: Dictionary = enemy_archetype_records[enemy_id]
+	record.focus_command_count = int(record.get("focus_command_count", 0)) + 1
+	var stats := get_archetype_stats(StringName(record.get("profile_id", &"")))
+	stats.focus_commands_received = int(stats.get("focus_commands_received", 0)) + 1
+
+
+func record_archetype_zone_entries() -> void:
+	for enemy_id: StringName in active_enemies.keys():
+		var enemy = active_enemies.get(enemy_id)
+		if (
+			not is_instance_valid(enemy)
+			or enemy.is_dead
+			or enemy.settlement_completed
+			or not enemy_archetype_records.has(enemy_id)
+		):
+			continue
+		var record: Dictionary = enemy_archetype_records[enemy_id]
+		var stats := get_archetype_stats(StringName(record.get("profile_id", &"")))
+		var rush_history: Array = enemy.rush_state_history
+		if (
+			not bool(record.get("rush_prepare_observed", false))
+			and PrototypeConfig.RUSH_STATE_PREPARING in rush_history
+		):
+			record.rush_prepare_observed = true
+			stats.rush_prepare_count = int(stats.get("rush_prepare_count", 0)) + 1
+		if (
+			not bool(record.get("rush_started_observed", false))
+			and PrototypeConfig.RUSH_STATE_RUSHING in rush_history
+		):
+			record.rush_started_observed = true
+			stats.rush_started_count = int(stats.get("rush_started_count", 0)) + 1
+		if bool(record.get("entered_a_alive", false)):
+			continue
+		if StringName(enemy.formation_zone_type) != PrototypeConfig.FORMATION_ZONE_A:
+			continue
+		record.entered_a_alive = true
+		record.a_entry_time = battle_elapsed
+		stats.entered_a_alive = int(stats.get("entered_a_alive", 0)) + 1
+		if int(record.get("focus_command_count", 0)) <= 0:
+			stats.entered_a_unfocused = int(stats.get("entered_a_unfocused", 0)) + 1
+
+
+func record_archetype_settlement(enemy_id: StringName, outcome: StringName) -> void:
+	if not enemy_archetype_records.has(enemy_id):
+		return
+	var record: Dictionary = enemy_archetype_records[enemy_id]
+	if StringName(record.get("settlement", &"")) != &"":
+		return
+	record.settlement = outcome
+	record.settlement_time = battle_elapsed
+	var profile_id := StringName(record.get("profile_id", &""))
+	var stats := get_archetype_stats(profile_id)
+	if outcome == &"KILLED":
+		stats.killed = int(stats.get("killed", 0)) + 1
+		if not bool(record.get("entered_a_alive", false)):
+			stats.killed_before_a = int(stats.get("killed_before_a", 0)) + 1
+			if int(record.get("focus_command_count", 0)) > 0:
+				stats.focus_killed_before_a = int(
+					stats.get("focus_killed_before_a", 0)
+				) + 1
+	elif outcome == &"LEAKED":
+		stats.leaked = int(stats.get("leaked", 0)) + 1
+
+
+func get_archetype_stats_snapshot() -> Dictionary:
+	var result := archetype_stats_by_profile.duplicate(true)
+	for profile_id in result.keys():
+		var stats: Dictionary = result[profile_id]
+		var generated := maxi(0, int(stats.get("generated", 0)))
+		stats["entered_a_ratio"] = (
+			float(stats.get("entered_a_alive", 0)) / float(generated)
+			if generated > 0 else 0.0
+		)
+		stats["unfocused_entered_a_ratio"] = (
+			float(stats.get("entered_a_unfocused", 0)) / float(generated)
+			if generated > 0 else 0.0
+		)
+	return result
+
+
 func handle_enemy_death(enemy_id: StringName) -> void:
 	if settled_enemy_ids.has(enemy_id) or not active_enemies.has(enemy_id):
 		return
 	var enemy = active_enemies[enemy_id]
 	if not is_instance_valid(enemy) or not enemy.is_dead:
 		return
+	record_archetype_settlement(enemy_id, &"KILLED")
 	formation_manager.handle_member_removed(
 		enemy_id,
 		PrototypeConfig.INTERRUPTION_MEMBER_DIED,
@@ -2274,6 +2482,7 @@ func handle_enemy_arrival(
 	var enemy = active_enemies[enemy_id]
 	if is_instance_valid(enemy) and enemy.is_dead:
 		return
+	record_archetype_settlement(enemy_id, &"LEAKED")
 	formation_manager.handle_member_removed(
 		enemy_id,
 		PrototypeConfig.INTERRUPTION_MEMBER_LEAKED,
@@ -2626,7 +2835,9 @@ func apply_formation_runtime_tuning() -> void:
 		float(tuning.get(
 			"b_formation_prepare_duration",
 			PrototypeConfig.DEFAULT_B_FORMATION_PREPARE_DURATION
-		))
+		)),
+		float(tuning.get("formation_a_spacing_scale", 1.0)),
+		float(tuning.get("formation_b_spacing_scale", 1.0))
 	)
 
 
@@ -2743,6 +2954,9 @@ func get_battle_snapshot() -> Dictionary:
 			formation_damage_prevented_by_profile.duplicate(true),
 		"speed_effect_observed_count": speed_effect_observed_ids.size(),
 		"speed_effect_observed_ids": speed_effect_observed_ids.duplicate(true),
+		"archetype_stats_by_profile": get_archetype_stats_snapshot(),
+		"enemy_archetype_records": enemy_archetype_records.duplicate(true),
+		"character_role_labels_enabled": are_character_role_labels_enabled(),
 		"demo_control_resistance_triggered":
 			demo_control_resistance_triggered,
 		"formation_stats": get_formation_stats_snapshot(),
@@ -2762,15 +2976,14 @@ func refresh_deployment_visuals() -> void:
 		return
 	for character_id: StringName in PrototypeConfig.get_character_ids():
 		var character = character_nodes[character_id]
-		var definition := PrototypeConfig.get_character_definition(character_id)
 		var card: Button = character_cards[character_id]
 		var slot_id := StringName(deployment_by_character.get(character_id, &""))
 		var selected_prefix := "▶ " if selected_character_id == character_id else ""
 		card.text = "%s%s｜HP%d｜范围%d%s" % [
 			selected_prefix,
-			String(definition.get("display_name", character_id)),
-			int(definition.get("max_health", 0)),
-			int(definition.get("action_range", 0)),
+			character.display_name,
+			character.max_health,
+			int(character.action_range),
 			"\n%s" % String(slot_id) if slot_id != &"" else "\n未部署",
 		]
 		character.set_selected(selected_character_id == character_id)

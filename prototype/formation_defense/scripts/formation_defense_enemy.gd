@@ -1042,6 +1042,44 @@ func _draw() -> void:
 	draw_circle(Vector2.ZERO, BODY_RADIUS + 3.0, Color(0.03, 0.05, 0.08, 0.85))
 	draw_circle(Vector2.ZERO, BODY_RADIUS, visible_color)
 	if type_marker == &"guard_shield":
+		var shield_points := PackedVector2Array([
+			Vector2(-8.0, -10.0), Vector2(8.0, -10.0),
+			Vector2(9.0, -2.0), Vector2(5.0, 7.0), Vector2(0.0, 11.0),
+			Vector2(-5.0, 7.0), Vector2(-9.0, -2.0),
+		])
+		draw_colored_polygon(shield_points, Color(0.86, 0.94, 1.0, 0.98))
+		var shield_outline := shield_points
+		shield_outline.append(shield_points[0])
+		draw_polyline(shield_outline, Color(0.08, 0.16, 0.25, 1.0), 2.0, true)
+		draw_line(Vector2(0.0, -8.0), Vector2(0.0, 7.0), Color(0.30, 0.48, 0.65), 1.5, true)
+	elif type_marker == &"speed_boot":
+		var boot_points := PackedVector2Array([
+			Vector2(-7.0, -10.0), Vector2(2.0, -10.0), Vector2(3.0, 0.0),
+			Vector2(10.0, 4.0), Vector2(9.0, 9.0), Vector2(-7.0, 9.0),
+			Vector2(-10.0, 5.0), Vector2(-4.0, 1.0),
+		])
+		draw_colored_polygon(boot_points, Color(1.0, 0.94, 0.72, 0.98))
+		var boot_outline := boot_points
+		boot_outline.append(boot_points[0])
+		draw_polyline(boot_outline, Color(0.24, 0.16, 0.08, 1.0), 2.0, true)
+		draw_line(Vector2(-4.0, -5.0), Vector2(2.0, -5.0), Color(0.55, 0.38, 0.12), 1.5, true)
+	elif type_marker == &"rush_rocket":
+		var rocket_points := PackedVector2Array([
+			Vector2(0.0, -12.0), Vector2(6.0, -5.0), Vector2(6.0, 6.0),
+			Vector2(0.0, 10.0), Vector2(-6.0, 6.0), Vector2(-6.0, -5.0),
+		])
+		draw_colored_polygon(rocket_points, Color(1.0, 0.91, 0.72, 0.98))
+		var rocket_outline := rocket_points
+		rocket_outline.append(rocket_points[0])
+		draw_polyline(rocket_outline, Color(0.30, 0.10, 0.06, 1.0), 2.0, true)
+		draw_circle(Vector2(0.0, -3.0), 2.6, Color(0.32, 0.68, 1.0, 1.0))
+		draw_colored_polygon(
+			PackedVector2Array([
+				Vector2(-4.0, 8.0), Vector2(0.0, 14.0), Vector2(4.0, 8.0),
+			]),
+			Color(1.0, 0.43, 0.12, 0.96)
+		)
+	elif type_marker == &"guard_shield_legacy":
 		draw_colored_polygon(
 			PackedVector2Array([
 				Vector2(-6.0, -34.0), Vector2(6.0, -34.0),

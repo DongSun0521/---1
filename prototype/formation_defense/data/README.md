@@ -1,5 +1,21 @@
 # 原型数据目录
 
+## V2-7B-P 三类特殊怪物综合战配置
+
+`v2_7b_three_archetype_full_battle` 使用固定种子 `2703`、4 秒初始倒计时、6 秒波间倒计时和现有 Wave Director 的 5 波结构。总数为 60：前三波分别生成 8 只 `formation_guard`、8 只 `rush_raider`、8 只 `charge`；第 4 波三类各 4；第 5 波拆成两轮，每轮三类各 4，第二轮相对第一轮延后 8.5 秒。混合波只通过 `start_offset`、`spawn_interval`、既有刷怪口及路线制造稳定重叠，不绕过选择、移动或组阵规则。
+
+顶层 `enemy_profile_overrides` 可按 battle 覆盖现有 profile 的 `display_name`、`type_marker`、`max_health` 和 `move_speed`。本战斗把 `formation_guard` 映射为护阵怪/盾牌/137 生命/33.6 速度，把 `charge` 映射为加速怪/靴子/75 生命/48 速度，把 `rush_raider` 映射为冲锋怪/火箭/137 生命/33.6 速度。覆盖值只随本战斗的生成事件传入现有敌人初始化入口；原 profile 仍为 91/42、50/60、91/42。加速和冲锋倍率继续读取各 profile 的既有机制字段。
+
+`formation_a_spacing_scale=0.75` 与 `formation_b_spacing_scale=0.68` 是本战斗的阵型几何覆盖。FormationManager 缺省倍率均为 1.0，因此历史 A 阵 56 间距和 B 阵 70×62 间距保持不变；本战斗的实际值为 42 和 47.6×42.16。缩放只影响正式槽位位置和由实际成员位置生成的轮廓，不改变成员数、组阵区域、路线兼容、配对裁决、锚点继承或 80 的靠拢速度。
+
+`character_role_labels_enabled=true` 只为本战斗启用配置显示名；缺省为 `false`。三类图标由生成事件中的 `type_marker` 驱动，角色名称和敌人图标均使用已有等比显示映射，没有可点击子控件或外部图片资源。综合战还启用既有 `character_ultimate_enabled`，但不会覆盖任何角色、大招、伤害、治疗或回能数据。
+
+V2-7B-R 将人工确认的游侠 500、法师 450 固化为 `FINAL_HUNTER_ACTION_RANGE` 与 `FINAL_MAGE_ACTION_RANGE`，并由最终综合战的 `character_action_range_overrides` 引用；数值只定义一次，运行代码不包含数值或战斗 ID 判断。未配置覆盖的历史验证战仍读取 `CHARACTER_DEFINITIONS` 的原范围，以避免改变其接敌与结算语义。战士 82、医生 330，以及四名角色的伤害、攻速、生命、治疗和大招数据均未改变。
+
+`position_ultimate_cast_area_normalized_rect` 为位置型大招提供可选的战斗级合法落点矩形。V2-7B 配置为 `Rect2(0.08, 0.10, 0.84, 0.80)`，正好覆盖防守交战区、B组阵区、A展示区、A组阵区和单体行走区；战士、法师、医生的预览与松手释放共用该矩形。字段缺省时仍使用角色大招定义中的 `FORWARD_RECT`，因此 V2-7A-P-R 与更早战斗的释放几何保持不变。该覆盖不改变作用圆、伤害、治疗、能量或回能。
+
+综合战专项的运行统计按 profile 记录生成、活着进入 A 区、未集火进入 A 区、A 区前死亡、集火后 A 区前死亡、击杀、漏怪、指令、突袭准备/启动和失败清理数量；阵型完成仍读取 FormationManager 的真实累计事件。`rush_raider` 因既有 `formation_can_participate=false` 不会生成伪造的 A/B 阵统计。
+
 ## V2-7A-P 角色大招配置
 
 `CHARACTER_ULTIMATE_DEFINITIONS` 集中保存四名原型角色的大招数据；历史战斗缺省使用 `DEFAULT_CHARACTER_ULTIMATE_ENABLED=false`。只有 `v2_7a_player_ultimate_validation` 显式设置 `character_ultimate_enabled=true`，固定随机种子为 `2702`，并通过 `ULTIMATE_VALIDATION_DEPLOYMENT` 提供战士 `middle_c4`、游侠 `top_c2`、法师 `bottom_c2`、医生 `middle_c2` 的推荐部署。
