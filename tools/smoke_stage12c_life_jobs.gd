@@ -289,8 +289,11 @@ func assert_life_character_ui(game_state: Node) -> void:
 	await process_frame
 	var village_view = main_view.find_child("VillageView", true, false)
 	require(village_view != null, "VillageView not found")
+	var life_character_entry = village_view.find_child(
+		"OpenLifeCharactersButton", true, false
+	)
 	require(
-		village_view.find_child("LifeRosterHotspot", true, false) != null,
+		life_character_entry is Button,
 		"village life-character entry is missing"
 	)
 	village_view.show_life_character_page()
