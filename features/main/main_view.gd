@@ -1,5 +1,9 @@
 extends Control
 
+const FormationDefensePreviewCoordinatorScript := preload(
+	"res://features/main/formation_defense_preview_coordinator.gd"
+)
+
 @onready var village_button: Button = $Root/Navigation/VillageButton
 @onready var expedition_button: Button = $Root/Navigation/ExpeditionButton
 @onready var village_view: Control = $Root/Content/VillageView
@@ -11,11 +15,14 @@ var mvp_panel: PanelContainer
 var mvp_summary_label: Label
 var continue_test_button: Button
 var new_game_button: Button
+var battle_preview_coordinator
+var _preview_return_view := &"village"
 
 
 func _ready() -> void:
 	game_state = get_node("/root/GameState")
 	setup_mvp_panel()
+	setup_battle_preview_coordinator()
 	apply_visual_style()
 	village_button.pressed.connect(show_village)
 	expedition_button.pressed.connect(show_expedition)
@@ -98,6 +105,15 @@ func setup_mvp_panel() -> void:
 	actions.add_child(new_game_button)
 
 
+func setup_battle_preview_coordinator() -> void:
+	battle_preview_coordinator = FormationDefensePreviewCoordinatorScript.new()
+	battle_preview_coordinator.name = "FormationDefensePreviewCoordinator"
+	add_child(battle_preview_coordinator)
+	battle_preview_coordinator.setup(game_state, $Root/Navigation, self)
+	battle_preview_coordinator.preview_started.connect(on_v2_preview_started)
+	battle_preview_coordinator.preview_returned.connect(on_v2_preview_returned)
+
+
 func show_village() -> void:
 	if game_state != null and game_state.is_battle_active():
 		show_battle()
@@ -126,6 +142,36 @@ func show_battle() -> void:
 	battle_view.visible = true
 	village_button.disabled = true
 	expedition_button.disabled = true
+
+
+func on_v2_preview_started() -> void:
+	_preview_return_view = _get_current_safe_view()
+	village_view.visible = false
+	expedition_view.visible = false
+	battle_view.visible = false
+	village_button.disabled = true
+	expedition_button.disabled = true
+
+
+func on_v2_preview_returned() -> void:
+	_restore_preview_return_view()
+
+
+func get_battle_route_debug_snapshot() -> Dictionary:
+	return battle_preview_coordinator.get_debug_snapshot()
+
+
+func _get_current_safe_view() -> StringName:
+	if expedition_view.visible:
+		return &"expedition"
+	return &"village"
+
+
+func _restore_preview_return_view() -> void:
+	if _preview_return_view == &"expedition":
+		show_expedition()
+	else:
+		show_village()
 
 
 func show_mvp_completed(summary: Dictionary) -> void:
