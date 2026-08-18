@@ -42,6 +42,7 @@
 | [`codex_handoff_12D.md`](codex_handoff_12D.md) | 生活角色工作成长 |
 | [`codex_handoff_12E.md`](codex_handoff_12E.md) | 生活角色招募、容量与解雇 |
 | [`codex_handoff_12F.md`](codex_handoff_12F.md) | 角色系统整合、反馈、配置、边界与 v6 存档 |
+| [`combat_v2_integration_baseline.md`](combat_v2_integration_baseline.md) | Combat V2-8A 正式数据流、输入/输出契约与接入边界 |
 
 Stage 8～10 的实现和测试入口没有单独阶段交接文件，已集中整理在
 [`codex_handoff_overall.md`](codex_handoff_overall.md)。
