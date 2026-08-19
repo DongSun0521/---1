@@ -6,8 +6,8 @@ const BattleContract := preload(
 const BattleRouter := preload(
 	"res://systems/formation_defense_battle_router.gd"
 )
-const PreviewRequestBuilder := preload(
-	"res://systems/formation_defense_preview_request_builder.gd"
+const FormalPartySource := preload(
+	"res://systems/formation_defense_formal_party_source.gd"
 )
 const PreviewHostScene := preload(
 	"res://features/battle/formation_defense_preview_host.tscn"
@@ -75,7 +75,7 @@ func run() -> void:
 		func(sequence: int) -> String: return "v2-8b-test-session-%02d" % sequence
 	)
 	check(router.set_mode(BattleRouter.MODE_V2_INTEGRATION_PREVIEW), "V2 requires an explicit mode selection")
-	var context := make_preview_context()
+	var context := make_preview_context(game_state)
 	var first_route: Dictionary = router.route_selected_battle(null, context)
 	check(bool(first_route.get("ok", false)), "explicit V2 selection creates a preview request")
 	var first_request: Dictionary = first_route.get("request", {})
@@ -88,7 +88,7 @@ func run() -> void:
 		"frozen V2 battle ID crosses the route"
 	)
 	check(first_request.battle_id == "forest_slime_pair", "formal source encounter ID is preserved")
-	check(all_party_ids_are_namespaced(first_request.party), "preview party uses only prototype: IDs")
+	check(all_party_ids_are_formal(first_request.party), "preview party uses formal stable IDs")
 	var duplicate_start: Dictionary = router.route_selected_battle(null, context)
 	check(not bool(duplicate_start.get("ok", false)), "consecutive clicks cannot create a second V2 session")
 	check(router.get_active_session_id() == first_request.battle_session_id, "duplicate start preserves the active session")
@@ -116,7 +116,7 @@ func run() -> void:
 	)
 	check(first_result.outcome in ["VICTORY", "DEFEAT"], "real run reports an actual victory or defeat")
 	check(int(first_result.battle_statistics.generated_enemies) > 0, "real run uses the Wave Director and spawns enemies")
-	check(all_party_result_ids_are_namespaced(first_result.party_results), "output cannot masquerade as formal characters")
+	check(all_party_result_ids_are_formal(first_result.party_results), "output preserves formal stable IDs")
 	check(snapshot_formal_sources(game_state) == formal_before, "real V2 terminal result writes no formal data")
 	check(snapshot_file(FORMAL_SAVE_PATH) == save_before, "real V2 run does not touch the save file")
 	var first_acceptance: Dictionary = router.accept_preview_result(first_result)
@@ -200,7 +200,7 @@ func run() -> void:
 	coordinator.close_v2_preview_summary()
 	check(not coordinator.v2_preview_summary_panel.visible, "summary closes without changing formal state")
 	var summary: String = coordinator.format_v2_preview_summary(first_result, first_request)
-	check(summary.contains("V2-8B接入预览未执行正式结算"), "debug summary states that settlement did not run")
+	check(summary.contains("V2-8C正式队伍预览未执行正式结算"), "debug summary states that settlement did not run")
 	check(summary.contains(first_result.battle_session_id), "debug summary comes from the accepted output contract")
 	check(summary.contains("forest_slime_pair"), "debug summary identifies the formal source encounter")
 	check(main.find_child("RewardButton", true, false) == null, "preview summary exposes no reward action")
@@ -273,32 +273,30 @@ func run_controlled_terminal(
 	}
 
 
-func make_preview_context() -> Dictionary:
+func make_preview_context(game_state: Node) -> Dictionary:
+	var party_creation := FormalPartySource.build_party_snapshots(game_state)
 	return {
 		"encounter_id": &"forest_slime_pair",
 		"encounter_node_id": "forest_depths",
 		"source_mode": &"FORMAL_EXPEDITION_CONTEXT",
+		"party_snapshots": party_creation.get("value", []).duplicate(true),
 	}
 
 
-func all_party_ids_are_namespaced(party: Array) -> bool:
+func all_party_ids_are_formal(party: Array) -> bool:
 	if party.size() != 4:
 		return false
 	for member: Dictionary in party:
-		if not PreviewRequestBuilder.is_prototype_character_id(
-			member.get("character_id", "")
-		):
+		if String(member.get("character_id", "")).begins_with("prototype:"):
 			return false
 	return true
 
 
-func all_party_result_ids_are_namespaced(party_results: Array) -> bool:
+func all_party_result_ids_are_formal(party_results: Array) -> bool:
 	if party_results.size() != 4:
 		return false
 	for member: Dictionary in party_results:
-		if not PreviewRequestBuilder.is_prototype_character_id(
-			member.get("character_id", "")
-		):
+		if String(member.get("character_id", "")).begins_with("prototype:"):
 			return false
 	return true
 

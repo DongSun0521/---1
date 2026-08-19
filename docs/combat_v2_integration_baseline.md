@@ -121,3 +121,8 @@ Vector 等运行对象全部拒绝。规范化结果会重新构造所有嵌套�
 - V2-8A检查点本身没有玩家可见切换按钮、正式入口或结算写入。后续V2-8B已在正式
   主界面增加开发期双轨入口，但V2仍只生成并展示契约结果，不执行正式结算；详见
   [`combat_v2_dual_battle_entry.md`](combat_v2_dual_battle_entry.md)。
+- V2-8C已让该预览读取正式队伍和最终属性，并动态生成1～4名V2角色；读取发生在正式侧
+  边界，契约、适配器、Router、Host与V2核心仍只处理深拷贝纯数据。角色结果仍不进入
+  `GameState`结算。V2-8C-R进一步用“正式最终/职业参考比例 × 冻结V2基准”显式适配
+  回合制正式属性与实时V2属性的数值尺度，契约仍接收可直接运行的V2就绪值；详见
+  [`combat_v2_formal_party_mapping.md`](combat_v2_formal_party_mapping.md)。

@@ -91,3 +91,7 @@ Host和Router不查找正式单例，也不调用V1完成/结算和`SaveSystem`�
 原型独立调试仍可直接运行
 `prototype/formation_defense/scenes/formation_defense_prototype.tscn`；此时场景选择、开始、
 重开和部署调试控件保持原样。接入预览模式会隐藏这些可能误导正式玩家的原型控制。
+
+> 后续状态：V2-8C已将正式主界面预览的临时`prototype:`队伍替换为当前
+> `CharacterRoster`正式队伍；V2-8B本页保留的是双轨入口检查点当时的边界记录。正式
+> 队伍映射见[`combat_v2_formal_party_mapping.md`](combat_v2_formal_party_mapping.md)。

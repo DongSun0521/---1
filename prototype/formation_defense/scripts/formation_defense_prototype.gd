@@ -106,6 +106,10 @@ var deployment_slots: Dictionary = {}
 var character_nodes: Dictionary = {}
 var character_cards: Dictionary = {}
 var deployment_by_character: Dictionary = {}
+var runtime_character_ids: Array[StringName] = PrototypeConfig.get_character_ids()
+var runtime_character_definitions: Dictionary = {}
+var integration_deployment_by_character: Dictionary = {}
+var integration_party_mode := false
 var run_sequence := 0
 var next_enemy_sequence := 1
 var automatic_simulation := true
@@ -511,8 +515,8 @@ func setup_deployment_slots() -> void:
 
 
 func setup_character_roster() -> void:
-	for character_id: StringName in PrototypeConfig.get_character_ids():
-		var definition := PrototypeConfig.get_character_definition(character_id)
+	for character_id: StringName in get_runtime_character_ids():
+		var definition := get_runtime_character_definition(character_id)
 		var character = PrototypeCharacter.new()
 		character.configure(character_id, definition)
 		character.character_died.connect(handle_character_death)
@@ -528,7 +532,83 @@ func setup_character_roster() -> void:
 		card.pressed.connect(select_character.bind(character_id))
 		character_card_row.add_child(card)
 		character_cards[character_id] = card
-	select_character(selected_character_id)
+	if not runtime_character_ids.is_empty():
+		select_character(runtime_character_ids[0])
+
+
+func configure_integration_party(runtime_party: Array) -> Dictionary:
+	if battle_state != BattleState.READY:
+		return _integration_party_failure("只能在READY状态配置正式V2队伍")
+	if runtime_party.is_empty() or runtime_party.size() > 4:
+		return _integration_party_failure("正式V2队伍必须包含1～4名角色")
+	var next_ids: Array[StringName] = []
+	var next_definitions: Dictionary = {}
+	var next_deployment: Dictionary = {}
+	for raw_definition: Variant in runtime_party:
+		if not raw_definition is Dictionary:
+			return _integration_party_failure("正式V2运行角色定义必须是字典")
+		var definition: Dictionary = raw_definition
+		var character_id := StringName(definition.get("character_id", &""))
+		var slot_id := StringName(definition.get("deployment_slot_id", &""))
+		if character_id == &"" or next_definitions.has(character_id):
+			return _integration_party_failure("正式V2运行角色ID为空或重复")
+		if slot_id == &"" or not deployment_slots.has(slot_id) \
+				or next_deployment.values().has(slot_id):
+			return _integration_party_failure("正式V2运行角色部署槽位非法或重复")
+		next_ids.append(character_id)
+		next_definitions[character_id] = definition.duplicate(true)
+		next_deployment[character_id] = slot_id
+
+	destroy_ultimate_ui()
+	clear_deployment()
+	for character in character_nodes.values():
+		if is_instance_valid(character):
+			character.queue_free()
+	for card in character_cards.values():
+		if is_instance_valid(card):
+			card.queue_free()
+	character_nodes.clear()
+	character_cards.clear()
+	deployment_by_character.clear()
+	runtime_character_ids = next_ids.duplicate()
+	runtime_character_definitions = next_definitions.duplicate(true)
+	integration_deployment_by_character = next_deployment.duplicate(true)
+	integration_party_mode = true
+	selected_character_id = runtime_character_ids[0]
+	setup_character_roster()
+	apply_character_contact_runtime_state()
+	apply_character_action_range_runtime_state()
+	apply_character_role_label_runtime_state()
+	apply_character_ultimate_runtime_state()
+	reset_ultimate_statistics()
+	refresh_deployment_visuals()
+	return {
+		"ok": true,
+		"errors": PackedStringArray(),
+		"character_ids": runtime_character_ids.duplicate(),
+	}
+
+
+func get_runtime_character_ids() -> Array[StringName]:
+	return runtime_character_ids.duplicate()
+
+
+func get_runtime_character_definition(character_id: StringName) -> Dictionary:
+	if runtime_character_definitions.has(character_id):
+		return runtime_character_definitions[character_id].duplicate(true)
+	return PrototypeConfig.get_character_definition(character_id)
+
+
+func is_integration_party_mode() -> bool:
+	return integration_party_mode
+
+
+func _integration_party_failure(message: String) -> Dictionary:
+	return {
+		"ok": false,
+		"errors": PackedStringArray([message]),
+		"character_ids": [],
+	}
 
 
 func on_scenario_selected(option_index: int) -> void:
@@ -634,7 +714,7 @@ func is_character_ultimate_enabled() -> bool:
 
 func apply_character_ultimate_runtime_state() -> void:
 	var enabled := is_character_ultimate_enabled()
-	for character_id: StringName in PrototypeConfig.get_character_ids():
+	for character_id: StringName in get_runtime_character_ids():
 		var character = character_nodes.get(character_id)
 		if not is_instance_valid(character):
 			continue
@@ -653,13 +733,16 @@ func apply_character_action_range_runtime_state() -> void:
 		"character_action_range_overrides",
 		{}
 	)
-	for character_id: StringName in PrototypeConfig.get_character_ids():
+	for character_id: StringName in get_runtime_character_ids():
 		var character = character_nodes.get(character_id)
 		if not is_instance_valid(character):
 			continue
-		var definition := PrototypeConfig.get_character_definition(character_id)
+		var definition := get_runtime_character_definition(character_id)
 		character.set_action_range(float(
-			overrides.get(character_id, definition.get("action_range", 0.0))
+			overrides.get(
+				character.role_id,
+				definition.get("action_range", 0.0)
+			)
 		))
 
 
@@ -683,7 +766,7 @@ func reset_ultimate_statistics() -> void:
 	ultimate_release_sequence = 0
 	ultimate_release_events.clear()
 	ultimate_stats_by_character.clear()
-	for character_id: StringName in PrototypeConfig.get_character_ids():
+	for character_id: StringName in get_runtime_character_ids():
 		ultimate_stats_by_character[character_id] = {
 			"release_count": 0,
 			"hit_count": 0,
@@ -728,7 +811,7 @@ func ensure_ultimate_ui() -> void:
 	margin.add_child(ultimate_button_row)
 	ultimate_buttons.clear()
 	ultimate_energy_bars.clear()
-	for character_id: StringName in PrototypeConfig.get_character_ids():
+	for character_id: StringName in get_runtime_character_ids():
 		var button := Button.new()
 		button.name = "UltimateButton_%s" % String(character_id)
 		button.custom_minimum_size = Vector2(214.0, 58.0)
@@ -793,7 +876,7 @@ func update_ultimate_ui() -> void:
 		return
 	ultimate_bar.visible = true
 	var energy_parts: Array[String] = []
-	for character_id: StringName in PrototypeConfig.get_character_ids():
+	for character_id: StringName in get_runtime_character_ids():
 		var character = character_nodes.get(character_id)
 		var button: Button = ultimate_buttons.get(character_id)
 		var energy_bar: ProgressBar = ultimate_energy_bars.get(character_id)
@@ -1123,7 +1206,7 @@ func get_ultimate_damage_targets(center: Vector2, radius: float) -> Array:
 
 func get_ultimate_heal_targets(center: Vector2, radius: float) -> Array:
 	var targets: Array = []
-	for character_id: StringName in PrototypeConfig.get_character_ids():
+	for character_id: StringName in get_runtime_character_ids():
 		var character = character_nodes.get(character_id)
 		if (
 			is_instance_valid(character)
@@ -1456,7 +1539,7 @@ func deploy_character(character_id: StringName, slot_id: StringName) -> bool:
 		return true
 	deployment_by_character[character_id] = slot_id
 	var character = character_nodes[character_id]
-	var definition := PrototypeConfig.get_character_definition(character_id)
+	var definition := get_runtime_character_definition(character_id)
 	target_slot.set_deployed_character(
 		character_id,
 		String(definition.get("display_name", character_id))
@@ -1496,7 +1579,7 @@ func undeploy_selected_character() -> bool:
 func clear_deployment() -> bool:
 	if battle_state != BattleState.READY:
 		return false
-	for character_id: StringName in PrototypeConfig.get_character_ids():
+	for character_id: StringName in get_runtime_character_ids():
 		var slot_id := StringName(deployment_by_character.get(character_id, &""))
 		if slot_id != &"":
 			var slot = deployment_slots.get(slot_id)
@@ -1515,16 +1598,19 @@ func apply_recommended_deployment() -> bool:
 	if battle_state != BattleState.READY:
 		return false
 	clear_deployment()
-	var recommended := PrototypeConfig.get_recommended_deployment(
-		selected_scenario_id
+	var recommended := (
+		integration_deployment_by_character.duplicate(true)
+		if integration_party_mode
+		else PrototypeConfig.get_recommended_deployment(selected_scenario_id)
 	)
-	for character_id: StringName in PrototypeConfig.get_character_ids():
+	for character_id: StringName in get_runtime_character_ids():
 		var slot_id := StringName(
 			recommended.get(character_id, &"")
 		)
 		if slot_id == &"" or not deploy_character(character_id, slot_id):
 			return false
-	select_character(&"guard")
+	if not runtime_character_ids.is_empty():
+		select_character(runtime_character_ids[0])
 	refresh_deployment_visuals()
 	return true
 
@@ -1926,7 +2012,7 @@ func update_enemy_blocking() -> void:
 			or enemy.settlement_completed
 		):
 			continue
-		for character_id: StringName in PrototypeConfig.get_character_ids():
+		for character_id: StringName in get_runtime_character_ids():
 			var character = character_nodes[character_id]
 			if not can_character_block_enemy(character, enemy):
 				continue
@@ -1990,7 +2076,7 @@ func update_enemy_character_contacts() -> void:
 
 func choose_character_contact_target(enemy):
 	var candidates: Array = []
-	for character_id: StringName in PrototypeConfig.get_character_ids():
+	for character_id: StringName in get_runtime_character_ids():
 		var character = character_nodes.get(character_id)
 		if is_character_in_contact_acquisition(character, enemy):
 			candidates.append(character)
@@ -2128,7 +2214,7 @@ func release_enemy_blocker(enemy) -> void:
 func simulate_character_actions(delta: float) -> void:
 	var enemies: Array = active_enemies.values()
 	var allies: Array = character_nodes.values()
-	for character_id: StringName in PrototypeConfig.get_character_ids():
+	for character_id: StringName in get_runtime_character_ids():
 		if battle_state != BattleState.RUNNING:
 			break
 		var character = character_nodes[character_id]
@@ -2785,7 +2871,7 @@ func get_deployment_slots_snapshot() -> Array:
 
 func get_character_snapshots() -> Array:
 	var snapshots: Array = []
-	for character_id: StringName in PrototypeConfig.get_character_ids():
+	for character_id: StringName in get_runtime_character_ids():
 		var character = character_nodes.get(character_id)
 		if is_instance_valid(character):
 			snapshots.append(character.get_runtime_snapshot())
@@ -2974,7 +3060,7 @@ func get_battle_snapshot() -> Dictionary:
 func refresh_deployment_visuals() -> void:
 	if not is_node_ready():
 		return
-	for character_id: StringName in PrototypeConfig.get_character_ids():
+	for character_id: StringName in get_runtime_character_ids():
 		var character = character_nodes[character_id]
 		var card: Button = character_cards[character_id]
 		var slot_id := StringName(deployment_by_character.get(character_id, &""))

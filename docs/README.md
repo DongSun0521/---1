@@ -44,6 +44,7 @@
 | [`codex_handoff_12F.md`](codex_handoff_12F.md) | 角色系统整合、反馈、配置、边界与 v6 存档 |
 | [`combat_v2_integration_baseline.md`](combat_v2_integration_baseline.md) | Combat V2-8A 正式数据流、输入/输出契约与接入边界 |
 | [`combat_v2_dual_battle_entry.md`](combat_v2_dual_battle_entry.md) | Combat V2-8B V1/V2双轨入口、预览会话、零写入边界与人工检查 |
+| [`combat_v2_formal_party_mapping.md`](combat_v2_formal_party_mapping.md) | Combat V2-8C/R 正式队伍读取、属性尺度适配、动态角色与零写入验证 |
 
 Stage 8～10 的实现和测试入口没有单独阶段交接文件，已集中整理在
 [`codex_handoff_overall.md`](codex_handoff_overall.md)。

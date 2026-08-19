@@ -7,6 +7,12 @@ signal preview_returned
 const BattleRouterScript := preload(
 	"res://systems/formation_defense_battle_router.gd"
 )
+const FormalPartySource := preload(
+	"res://systems/formation_defense_formal_party_source.gd"
+)
+const ProfessionCompatibility := preload(
+	"res://systems/formation_defense_profession_compatibility.gd"
+)
 const V2_PREVIEW_HOST_SCENE_PATH := (
 	"res://features/battle/formation_defense_preview_host.tscn"
 )
@@ -21,6 +27,7 @@ var v2_preview_host
 var v2_preview_summary_panel: PanelContainer
 var v2_preview_summary_label: Label
 var last_v2_preview_summary_text := ""
+var last_v2_party_debug_text := ""
 var _last_preview_request: Dictionary = {}
 
 
@@ -48,7 +55,7 @@ func on_battle_route_selected(option_index: int) -> void:
 	if battle_router.current_mode == BattleRouterScript.MODE_V1:
 		battle_route_status_label.text = "V1为默认正式路径；遭遇、奖励与进度保持原流程"
 	else:
-		battle_route_status_label.text = "V2预览使用原型角色，不读取队伍且不执行结算"
+		battle_route_status_label.text = "V2预览读取当前正式队伍与最终属性，但不执行结算"
 
 
 func on_battle_route_start_pressed() -> void:
@@ -58,9 +65,22 @@ func on_battle_route_start_pressed() -> void:
 	if game_state.is_battle_active():
 		battle_route_status_label.text = "V1正式战斗进行中，不能并行启动预览"
 		return
+	var source_context := build_battle_route_source_context()
+	if battle_router.current_mode == BattleRouterScript.MODE_V2_INTEGRATION_PREVIEW:
+		var party_creation := FormalPartySource.build_party_snapshots(game_state)
+		if not bool(party_creation.get("ok", false)):
+			battle_route_status_label.text = "; ".join(
+				party_creation.get("errors", ["正式队伍无法构建"])
+			)
+			return
+		source_context["party_snapshots"] = party_creation["value"].duplicate(true)
+		last_v2_party_debug_text = format_party_debug(
+			party_creation["value"]
+		)
+		battle_route_status_label.text = last_v2_party_debug_text
 	var route_result: Dictionary = battle_router.route_selected_battle(
 		game_state,
-		build_battle_route_source_context()
+		source_context
 	)
 	if not bool(route_result.get("ok", false)):
 		battle_route_status_label.text = "; ".join(
@@ -107,7 +127,7 @@ func format_v2_preview_summary(
 	var battle_config_ref: Dictionary = request.get("battle_config_ref", {})
 	var durability: Dictionary = result.get("village_durability", {})
 	var statistics: Dictionary = result.get("battle_statistics", {})
-	return "\n".join(PackedStringArray([
+	var lines := PackedStringArray([
 		"battle_session_id：%s" % String(result.get("battle_session_id", "")),
 		"settlement_id：%s" % String(result.get("settlement_id", "")),
 		"正式来源：%s" % source_text,
@@ -127,10 +147,81 @@ func format_v2_preview_summary(
 			int(statistics.get("defeated_enemies", 0)),
 			int(statistics.get("leaked_enemies", 0)),
 		],
-		"",
-		"V2-8B接入预览未执行正式结算",
-		"原型角色结果未写入CharacterRoster、伤情、奖励、远征或存档。",
-	]))
+		"正式角色结果：",
+	])
+	var members_by_id: Dictionary = {}
+	for member: Dictionary in request.get("party", []):
+		members_by_id[String(member.get("character_id", ""))] = member
+	for party_result: Dictionary in result.get("party_results", []):
+		var character_id := String(party_result.get("character_id", ""))
+		var member: Dictionary = members_by_id.get(character_id, {})
+		var personal: Dictionary = party_result.get("statistics", {})
+		lines.append(
+			"- %s（%s）｜%s｜剩余HP %d｜伤害%d／承伤%d／治疗%d／大招%d"
+			% [
+				String(member.get("display_name", character_id)),
+				character_id,
+				"倒下" if bool(party_result.get("is_down", false)) else "存活",
+				int(party_result.get("remaining_hp", 0)),
+				int(personal.get("damage_dealt", 0)),
+				int(personal.get("damage_taken", 0)),
+				int(personal.get("healing_done", 0)),
+				int(personal.get("ultimate_casts", 0)),
+			]
+		)
+	lines.append("")
+	lines.append("V2-8C正式队伍预览未执行正式结算")
+	lines.append("正式角色经验、生命、装备、伤情、奖励、远征与存档均未写入。")
+	return "\n".join(lines)
+
+
+func format_party_debug(party: Array) -> String:
+	var lines := PackedStringArray(["正式队伍：%d人（V2-8C不结算预览）" % party.size()])
+	for member: Dictionary in party:
+		var profession_id := StringName(member.get("profession_id", &""))
+		var compatibility := ProfessionCompatibility.get_compatibility(profession_id)
+		var stats: Dictionary = member.get("final_stats", {})
+		var report: Dictionary = member.get("stat_scale_report", {})
+		var formal: Dictionary = report.get("formal_final_stats", {})
+		var reference: Dictionary = report.get("formal_reference_stats", {})
+		var ratios: Dictionary = report.get("ratios", {})
+		var baseline: Dictionary = report.get("v2_baseline_stats", {})
+		var runtime: Dictionary = report.get("v2_runtime_stats", {})
+		var role_id := StringName(compatibility.get("v2_role_id", &""))
+		lines.append(
+			(
+				"槽%d %s[%s] %s→%s\n"
+			+ "  正式 HP%.1f/攻%.1f/速%.2f｜参考 %.1f/%.1f/%.2f｜比例 %.3f/%.3f/%.3f\n"
+			+ "  V2基准 HP%.1f/%s%.1f/%.3fs｜运行 HP%d/%s%d/%.3fs｜范围%.0f"
+			)
+			% [
+				int(member.get("party_slot", -1)) + 1,
+				String(member.get("display_name", "")),
+				String(member.get("character_id", "")),
+				String(profession_id),
+				String(role_id),
+				float(formal.get("max_hp", 0.0)),
+				float(formal.get("attack", 0.0)),
+				float(formal.get("attack_speed", 0.0)),
+				float(reference.get("max_hp", 0.0)),
+				float(reference.get("attack", 0.0)),
+				float(reference.get("attack_speed", 0.0)),
+				float(ratios.get("max_hp", 0.0)),
+				float(ratios.get("attack", 0.0)),
+				float(ratios.get("attack_speed", 0.0)),
+				float(baseline.get("max_health", 0.0)),
+				"治疗" if role_id == &"doctor" else "攻击",
+				float(baseline.get("attack_or_heal", 0.0)),
+				float(baseline.get("action_interval", 0.0)),
+				int(runtime.get("max_health", stats.get("max_hp", 0))),
+				"治疗" if role_id == &"doctor" else "攻击",
+				int(runtime.get("attack_or_heal", stats.get("attack", 0))),
+				float(runtime.get("action_interval", 0.0)),
+				float(runtime.get("action_range", compatibility.get("action_range", 0.0))),
+			]
+		)
+	lines.append(ProfessionCompatibility.COMPATIBILITY_SOURCE)
+	return "\n".join(lines)
 
 
 func close_v2_preview_summary() -> void:
@@ -144,6 +235,7 @@ func get_debug_snapshot() -> Dictionary:
 		"summary_visible": v2_preview_summary_panel.visible,
 		"summary_text": last_v2_preview_summary_text,
 		"route_status": battle_route_status_label.text,
+		"party_debug_text": last_v2_party_debug_text,
 		"router": battle_router.get_snapshot(),
 	}
 
@@ -185,9 +277,14 @@ func _start_v2_preview_scene(request: Dictionary) -> void:
 		_teardown_v2_preview_host()
 		preview_returned.emit()
 		return
+	if v2_preview_host.has_method("set_party_scale_debug_text"):
+		v2_preview_host.call(
+			"set_party_scale_debug_text",
+			last_v2_party_debug_text
+		)
 	battle_route_option.disabled = true
 	battle_route_start_button.disabled = true
-	battle_route_status_label.text = "V2接入预览运行中：不会执行正式结算"
+	battle_route_status_label.text = "V2正式队伍预览运行中：不会执行正式结算"
 	preview_started.emit()
 
 
@@ -208,6 +305,7 @@ func on_v2_preview_finished(result: Dictionary) -> void:
 	)
 	v2_preview_summary_label.text = last_v2_preview_summary_text
 	_teardown_v2_preview_host()
+	_last_preview_request = {}
 	_enable_route_controls()
 	v2_preview_summary_panel.visible = true
 	battle_route_status_label.text = "V2预览已返回；正式数据与进度未结算"
@@ -218,6 +316,7 @@ func on_v2_preview_error(message: String) -> void:
 	battle_router.fail_active_preview(message)
 	battle_route_status_label.text = message
 	_teardown_v2_preview_host()
+	_last_preview_request = {}
 	_enable_route_controls()
 	preview_returned.emit()
 

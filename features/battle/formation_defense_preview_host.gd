@@ -7,8 +7,8 @@ signal preview_error(message: String)
 const BattleContract := preload(
 	"res://scripts/data/formation_defense_battle_contract.gd"
 )
-const PreviewRequestBuilder := preload(
-	"res://systems/formation_defense_preview_request_builder.gd"
+const ProfessionCompatibility := preload(
+	"res://systems/formation_defense_profession_compatibility.gd"
 )
 const PrototypeConfig := preload(
 	"res://prototype/formation_defense/data/formation_defense_config.gd"
@@ -25,6 +25,8 @@ var _battle_mount: Control
 var _status_label: Label
 var _exit_button: Button
 var _terminal_emitted := false
+var _last_terminal_debug_snapshot: Dictionary = {}
+var _external_party_debug_text := ""
 
 
 func _ready() -> void:
@@ -71,9 +73,34 @@ func start_preview(raw_request: Dictionary) -> Dictionary:
 		return _failure("V2预览场景根节点必须是Control")
 	active_request = request.duplicate(true)
 	_terminal_emitted = false
+	_last_terminal_debug_snapshot = {}
 	_prototype = instance
 	_battle_mount.add_child(_prototype)
 	_prototype.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var runtime_party_creation := ProfessionCompatibility.build_runtime_party(
+		request.get("party", [])
+	)
+	if not bool(runtime_party_creation.get("ok", false)):
+		_cleanup_runtime()
+		return _failure(
+			"V2正式队伍运行映射失败：%s" % "; ".join(
+				runtime_party_creation.get("errors", [])
+			)
+		)
+	if not _prototype.has_method("configure_integration_party"):
+		_cleanup_runtime()
+		return _failure("V2预览场景缺少正式队伍动态配置入口")
+	var party_configuration: Dictionary = _prototype.call(
+		"configure_integration_party",
+		runtime_party_creation.get("value", [])
+	)
+	if not bool(party_configuration.get("ok", false)):
+		_cleanup_runtime()
+		return _failure(
+			"V2正式队伍动态生成失败：%s" % "; ".join(
+				party_configuration.get("errors", [])
+			)
+		)
 	if not _prototype.has_method("select_scenario") \
 			or not _prototype.call("select_scenario", scenario_id):
 		_cleanup_runtime()
@@ -81,15 +108,16 @@ func start_preview(raw_request: Dictionary) -> Dictionary:
 	_configure_integration_preview_ui()
 	if not _prototype.call("apply_recommended_deployment"):
 		_cleanup_runtime()
-		return _failure("V2预览无法部署冻结原型角色")
+		return _failure("V2预览无法按正式队伍槽位部署角色")
 	if not _prototype.call("start_battle"):
 		_cleanup_runtime()
 		return _failure("V2预览战斗启动失败")
 	_prototype.battle_finished.connect(_on_prototype_battle_finished)
-	_status_label.text = (
-		"V2接入预览（不结算）｜原型角色，尚未接入正式队伍｜Session %s"
-		% String(active_request.get("battle_session_id", ""))
-	)
+	_status_label.text = "V2正式队伍预览（不结算）｜%d人｜Session %s" % [
+		active_request.get("party", []).size(),
+		String(active_request.get("battle_session_id", "")),
+	]
+	_status_label.tooltip_text = get_party_debug_text()
 	visible = true
 	set_process_input(true)
 	return {
@@ -131,6 +159,16 @@ func get_active_prototype():
 	return _prototype
 
 
+func get_last_terminal_debug_snapshot() -> Dictionary:
+	return _last_terminal_debug_snapshot.duplicate(true)
+
+
+func set_party_scale_debug_text(debug_text: String) -> void:
+	_external_party_debug_text = debug_text
+	if is_instance_valid(_status_label):
+		_status_label.tooltip_text = get_party_debug_text()
+
+
 func get_snapshot() -> Dictionary:
 	return {
 		"active": not active_request.is_empty(),
@@ -140,7 +178,44 @@ func get_snapshot() -> Dictionary:
 		"prototype_scene_count": 1 if is_instance_valid(_prototype) else 0,
 		"terminal_emitted": _terminal_emitted,
 		"preview_scene_path": preview_scene_path,
+		"party_debug_text": get_party_debug_text(),
 	}
+
+
+func get_party_debug_text() -> String:
+	if not _external_party_debug_text.is_empty():
+		return _external_party_debug_text
+	if active_request.is_empty():
+		return ""
+	var lines := PackedStringArray([
+		"正式队伍：%d人" % active_request.get("party", []).size(),
+	])
+	for member: Dictionary in active_request.get("party", []):
+		var compatibility := ProfessionCompatibility.get_compatibility(
+			StringName(member.get("profession_id", &""))
+		)
+		var stats: Dictionary = member.get("final_stats", {})
+		var action_interval := ProfessionCompatibility.v2_attack_rate_to_action_interval(
+			float(stats.get("attack_speed", 0.0))
+		)
+		var role_id := StringName(compatibility.get("v2_role_id", &""))
+		lines.append(
+			"槽%d %s｜ID=%s｜职业=%s→%s｜HP=%d｜%s=%d｜间隔=%.3fs｜范围=%.0f｜%s"
+			% [
+				int(member.get("party_slot", -1)) + 1,
+				String(member.get("display_name", "")),
+				String(member.get("character_id", "")),
+				String(member.get("profession_id", "")),
+				String(role_id),
+				int(stats.get("max_hp", 0)),
+				"治疗" if role_id == &"doctor" else "攻击",
+				int(stats.get("attack", 0)),
+				action_interval,
+				float(compatibility.get("action_range", 0.0)),
+				ProfessionCompatibility.COMPATIBILITY_SOURCE,
+			]
+		)
+	return "\n".join(lines)
 
 
 func _input(event: InputEvent) -> void:
@@ -229,8 +304,9 @@ func _finish_preview(outcome: String) -> bool:
 	if _terminal_emitted or active_request.is_empty():
 		return false
 	_terminal_emitted = true
+	_last_terminal_debug_snapshot = _get_prototype_snapshot().duplicate(true)
 	var result_creation := BattleContract.create_result(
-		_build_result_source(outcome)
+		_build_result_source(outcome, _last_terminal_debug_snapshot)
 	)
 	if not bool(result_creation.get("ok", false)):
 		var message := "V2预览输出契约非法：%s" % "; ".join(
@@ -245,18 +321,25 @@ func _finish_preview(outcome: String) -> bool:
 	return true
 
 
-func _build_result_source(outcome: String) -> Dictionary:
-	var snapshot := _get_prototype_snapshot()
+func _build_result_source(
+	outcome: String,
+	raw_snapshot: Dictionary = {}
+) -> Dictionary:
+	var snapshot := (
+		raw_snapshot.duplicate(true)
+		if not raw_snapshot.is_empty()
+		else _get_prototype_snapshot()
+	)
 	var characters_by_id: Dictionary = {}
 	for character: Dictionary in snapshot.get("characters", []):
 		characters_by_id[StringName(character.get("character_id", &""))] = character
 	var party_results: Array = []
 	for member: Dictionary in active_request.get("party", []):
-		var local_id := PreviewRequestBuilder.get_local_character_id(
-			member.get("character_id", "")
-		)
-		var character: Dictionary = characters_by_id.get(local_id, {})
-		var is_doctor := local_id == &"doctor"
+		var formal_id := StringName(member.get("character_id", &""))
+		var character: Dictionary = characters_by_id.get(formal_id, {})
+		var is_doctor := ProfessionCompatibility.get_v2_role_id(
+			StringName(member.get("profession_id", &""))
+		) == &"doctor"
 		party_results.append({
 			"character_id": String(member.get("character_id", "")),
 			"is_down": not bool(character.get("is_alive", false)),

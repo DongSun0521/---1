@@ -8,6 +8,11 @@ const ROLE_LABEL_RECT := Rect2(-30.0, 25.0, 60.0, 18.0)
 
 var character_id: StringName = &""
 var role_id: StringName = &""
+var formal_profession_id: StringName = &""
+var party_slot := -1
+var battle_visual_id: StringName = &""
+var equipped_skill_ids: Array = []
+var compatibility_source := ""
 var display_name := ""
 var role_label_visible := false
 var deployed_slot_id: StringName = &""
@@ -58,6 +63,13 @@ var ultimate_last_event_trigger_time := -1.0
 func configure(new_character_id: StringName, definition: Dictionary) -> void:
 	character_id = new_character_id
 	role_id = StringName(definition.get("role_id", new_character_id))
+	formal_profession_id = StringName(
+		definition.get("formal_profession_id", role_id)
+	)
+	party_slot = int(definition.get("party_slot", -1))
+	battle_visual_id = StringName(definition.get("battle_visual_id", &""))
+	equipped_skill_ids = definition.get("equipped_skill_ids", []).duplicate(true)
+	compatibility_source = String(definition.get("compatibility_source", ""))
 	display_name = String(definition.get("display_name", new_character_id))
 	max_health = maxi(1, int(definition.get("max_health", 1)))
 	action_interval = maxf(0.05, float(definition.get("action_interval", 1.0)))
@@ -541,6 +553,11 @@ func get_runtime_snapshot() -> Dictionary:
 	return {
 		"character_id": character_id,
 		"role_id": role_id,
+		"formal_profession_id": formal_profession_id,
+		"party_slot": party_slot,
+		"battle_visual_id": battle_visual_id,
+		"equipped_skill_ids": equipped_skill_ids.duplicate(true),
+		"compatibility_source": compatibility_source,
 		"display_name": display_name,
 		"role_label_visible": role_label_visible,
 		"role_label_rect": ROLE_LABEL_RECT,
