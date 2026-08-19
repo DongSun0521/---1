@@ -27,6 +27,7 @@ var _exit_button: Button
 var _terminal_emitted := false
 var _last_terminal_debug_snapshot: Dictionary = {}
 var _external_party_debug_text := ""
+var _is_settlement_validation := false
 
 
 func _ready() -> void:
@@ -49,6 +50,9 @@ func start_preview(raw_request: Dictionary) -> Dictionary:
 			)
 		)
 	var request: Dictionary = request_creation["value"]
+	_is_settlement_validation = String(
+		request.get("encounter_context", {}).get("source_mode", "")
+	) == "FORMAL_SETTLEMENT_VALIDATION"
 	var wave_config_id := StringName(
 		request["battle_config_ref"].get("wave_config_id", &"")
 	)
@@ -113,10 +117,21 @@ func start_preview(raw_request: Dictionary) -> Dictionary:
 		_cleanup_runtime()
 		return _failure("V2预览战斗启动失败")
 	_prototype.battle_finished.connect(_on_prototype_battle_finished)
-	_status_label.text = "V2正式队伍预览（不结算）｜%d人｜Session %s" % [
+	_status_label.text = "%s｜%d人｜Session %s" % [
+		(
+			"V2正式结算验证（会改变测试存档）"
+			if _is_settlement_validation
+			else "V2正式队伍预览（不结算）"
+		),
 		active_request.get("party", []).size(),
 		String(active_request.get("battle_session_id", "")),
 	]
+	_exit_button.text = "中止战斗" if _is_settlement_validation else "退出预览"
+	_exit_button.tooltip_text = (
+		"安全中止并返回；不执行正式结算，当前遭遇保持可重试"
+		if _is_settlement_validation
+		else "安全中止本局并返回；不会执行正式结算"
+	)
 	_status_label.tooltip_text = get_party_debug_text()
 	visible = true
 	set_process_input(true)
@@ -426,6 +441,7 @@ func _cleanup_runtime() -> void:
 		_prototype.queue_free()
 	_prototype = null
 	active_request = {}
+	_is_settlement_validation = false
 	visible = false
 	set_process_input(false)
 

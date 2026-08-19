@@ -95,3 +95,8 @@ Host和Router不查找正式单例，也不调用V1完成/结算和`SaveSystem`�
 > 后续状态：V2-8C已将正式主界面预览的临时`prototype:`队伍替换为当前
 > `CharacterRoster`正式队伍；V2-8B本页保留的是双轨入口检查点当时的边界记录。正式
 > 队伍映射见[`combat_v2_formal_party_mapping.md`](combat_v2_formal_party_mapping.md)。
+
+> V2-8D又增加了必须手动选择的`V2_SETTLEMENT_VALIDATION`。它只能从活动远征的真实
+> 未解决遭遇启动，并在确认警告后通过正式结算服务应用一次结果；本页原有
+> `V2_INTEGRATION_PREVIEW`零写入边界和V1默认值不变。详见
+> [`combat_v2_formal_settlement.md`](combat_v2_formal_settlement.md)。

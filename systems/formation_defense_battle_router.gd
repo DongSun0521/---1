@@ -13,10 +13,16 @@ const PreviewRequestBuilder := preload(
 
 const MODE_V1 := &"V1"
 const MODE_V2_INTEGRATION_PREVIEW := &"V2_INTEGRATION_PREVIEW"
-const VALID_MODES: Array[StringName] = [MODE_V1, MODE_V2_INTEGRATION_PREVIEW]
+const MODE_V2_SETTLEMENT_VALIDATION := &"V2_SETTLEMENT_VALIDATION"
+const VALID_MODES: Array[StringName] = [
+	MODE_V1,
+	MODE_V2_INTEGRATION_PREVIEW,
+	MODE_V2_SETTLEMENT_VALIDATION,
+]
 
 var current_mode: StringName = MODE_V1
 var active_request: Dictionary = {}
+var active_session_mode: StringName = &""
 var last_accepted_result: Dictionary = {}
 var last_error := ""
 var rejected_result_count := 0
@@ -51,13 +57,28 @@ func route_selected_battle(
 		return _start_v1(formal_battle_gateway, source_context)
 	if current_mode == MODE_V2_INTEGRATION_PREVIEW:
 		return _start_v2_preview(source_context)
+	if current_mode == MODE_V2_SETTLEMENT_VALIDATION:
+		return _start_v2_settlement(source_context)
 	set_mode(current_mode)
 	return _failure(last_error)
 
 
 func accept_preview_result(raw_result: Dictionary) -> Dictionary:
+	return _accept_active_result(raw_result, MODE_V2_INTEGRATION_PREVIEW)
+
+
+func accept_settlement_result(raw_result: Dictionary) -> Dictionary:
+	return _accept_active_result(raw_result, MODE_V2_SETTLEMENT_VALIDATION)
+
+
+func _accept_active_result(
+	raw_result: Dictionary,
+	expected_mode: StringName
+) -> Dictionary:
 	if active_request.is_empty():
-		return _reject_result("无活动V2预览会话，结果已拒绝")
+		return _reject_result("无活动V2会话，结果已拒绝")
+	if active_session_mode != expected_mode:
+		return _reject_result("V2结果提交到了错误的会话模式")
 	var creation := BattleContract.create_result(raw_result)
 	if not bool(creation.get("ok", false)):
 		return _reject_result(
@@ -88,6 +109,7 @@ func accept_preview_result(raw_result: Dictionary) -> Dictionary:
 	_closed_session_ids[result_session_id] = true
 	last_accepted_result = result.duplicate(true)
 	active_request = {}
+	active_session_mode = &""
 	last_error = ""
 	return {
 		"ok": true,
@@ -98,9 +120,14 @@ func accept_preview_result(raw_result: Dictionary) -> Dictionary:
 
 
 func fail_active_preview(message: String) -> void:
+	fail_active_session(message)
+
+
+func fail_active_session(message: String) -> void:
 	if not active_request.is_empty():
 		_closed_session_ids[String(active_request.get("battle_session_id", ""))] = true
 	active_request = {}
+	active_session_mode = &""
 	last_error = message
 	push_warning(message)
 
@@ -119,6 +146,7 @@ func get_snapshot() -> Dictionary:
 		"has_active_preview": has_active_preview_session(),
 		"active_session_id": get_active_session_id(),
 		"active_request": active_request.duplicate(true),
+		"active_session_mode": active_session_mode,
 		"last_accepted_result": last_accepted_result.duplicate(true),
 		"last_error": last_error,
 		"rejected_result_count": rejected_result_count,
@@ -159,11 +187,34 @@ func _start_v2_preview(source_context: Dictionary) -> Dictionary:
 		)
 		return request_creation
 	active_request = request_creation["value"].duplicate(true)
+	active_session_mode = MODE_V2_INTEGRATION_PREVIEW
 	last_error = ""
 	return {
 		"ok": true,
 		"errors": PackedStringArray(),
 		"route": MODE_V2_INTEGRATION_PREVIEW,
+		"request": active_request.duplicate(true),
+	}
+
+
+func _start_v2_settlement(source_context: Dictionary) -> Dictionary:
+	var session_id := _next_session_id()
+	var request_creation := PreviewRequestBuilder.build_settlement_request(
+		session_id,
+		source_context
+	)
+	if not bool(request_creation.get("ok", false)):
+		last_error = "V2正式结算请求无效：%s" % "; ".join(
+			request_creation.get("errors", [])
+		)
+		return request_creation
+	active_request = request_creation["value"].duplicate(true)
+	active_session_mode = MODE_V2_SETTLEMENT_VALIDATION
+	last_error = ""
+	return {
+		"ok": true,
+		"errors": PackedStringArray(),
+		"route": MODE_V2_SETTLEMENT_VALIDATION,
 		"request": active_request.duplicate(true),
 	}
 

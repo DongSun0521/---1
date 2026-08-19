@@ -110,6 +110,11 @@ func setup_battle_preview_coordinator() -> void:
 	battle_preview_coordinator.name = "FormationDefensePreviewCoordinator"
 	add_child(battle_preview_coordinator)
 	battle_preview_coordinator.setup(game_state, $Root/Navigation, self)
+	if expedition_view.has_method("set_battle_start_router"):
+		expedition_view.call(
+			"set_battle_start_router",
+			Callable(battle_preview_coordinator, "route_formal_encounter")
+		)
 	battle_preview_coordinator.preview_started.connect(on_v2_preview_started)
 	battle_preview_coordinator.preview_returned.connect(on_v2_preview_returned)
 
@@ -168,7 +173,8 @@ func _get_current_safe_view() -> StringName:
 
 
 func _restore_preview_return_view() -> void:
-	if _preview_return_view == &"expedition":
+	if _preview_return_view == &"expedition" \
+			and game_state.is_expedition_active():
 		show_expedition()
 	else:
 		show_village()

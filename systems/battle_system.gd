@@ -79,6 +79,20 @@ func create_initial_state() -> Dictionary:
 	}
 
 
+func get_encounter_settlement_profile(encounter_id: StringName) -> Dictionary:
+	if not ENCOUNTERS.has(encounter_id):
+		return {}
+	var encounter: Dictionary = ENCOUNTERS[encounter_id]
+	return {
+		"encounter_id": encounter_id,
+		"node_id": StringName(encounter.get("node_id", EMPTY_ID)),
+		"is_boss": bool(encounter.get("is_boss", false)),
+		"reward_ore": int(encounter.get("reward_ore", 0)),
+		"reward_herb": int(encounter.get("reward_herb", 0)),
+		"reward_core": int(encounter.get("reward_core", 0)),
+	}
+
+
 func start_battle(game_state, encounter_id: StringName) -> bool:
 	if bool(game_state.battle_state.get("is_active", false)):
 		return false

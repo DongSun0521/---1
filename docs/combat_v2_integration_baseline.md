@@ -126,3 +126,7 @@ Vector 等运行对象全部拒绝。规范化结果会重新构造所有嵌套�
   `GameState`结算。V2-8C-R进一步用“正式最终/职业参考比例 × 冻结V2基准”显式适配
   回合制正式属性与实时V2属性的数值尺度，契约仍接收可直接运行的V2就绪值；详见
   [`combat_v2_formal_party_mapping.md`](combat_v2_formal_party_mapping.md)。
+- V2-8D新增必须手动选择的`V2_SETTLEMENT_VALIDATION`。它只接受活动远征中的真实未解决
+  遭遇，通过正式结算服务复用V1经验、奖励、伤情和远征API；预览模式继续零写入，结算
+  不会自动保存。详细语义见
+  [`combat_v2_formal_settlement.md`](combat_v2_formal_settlement.md)。
