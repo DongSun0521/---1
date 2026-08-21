@@ -16,6 +16,9 @@ const ProfessionCompatibility := preload(
 const SettlementServiceScript := preload(
 	"res://systems/formation_defense_settlement_service.gd"
 )
+const IntegrationPolicyScript := preload(
+	"res://systems/formation_defense_integration_policy.gd"
+)
 const V2_PREVIEW_HOST_SCENE_PATH := (
 	"res://features/battle/formation_defense_preview_host.tscn"
 )
@@ -24,6 +27,7 @@ var game_state
 var overlay_parent: Control
 var battle_router
 var settlement_service
+var integration_policy
 var battle_route_option: OptionButton
 var battle_route_start_button: Button
 var battle_route_status_label: Label
@@ -37,20 +41,29 @@ var last_v2_party_debug_text := ""
 var _last_preview_request: Dictionary = {}
 var _active_v2_mode: StringName = &""
 var _pending_settlement_context: Dictionary = {}
+var _debug_route_override_active := false
 
 
 func setup(
 	formal_game_state: Object,
 	navigation: HBoxContainer,
-	main_overlay_parent: Control
+	main_overlay_parent: Control,
+	injected_policy = null
 ) -> void:
 	game_state = formal_game_state
 	overlay_parent = main_overlay_parent
 	battle_router = BattleRouterScript.new()
 	settlement_service = SettlementServiceScript.new()
-	_build_route_controls(navigation)
+	integration_policy = (
+		injected_policy
+		if injected_policy != null
+		else IntegrationPolicyScript.new()
+	)
+	if integration_policy.debug_tools_visible:
+		_build_route_controls(navigation)
 	_build_summary_panel()
-	_build_settlement_confirmation_dialog()
+	if integration_policy.debug_tools_visible:
+		_build_settlement_confirmation_dialog()
 
 
 func _exit_tree() -> void:
@@ -58,24 +71,29 @@ func _exit_tree() -> void:
 
 
 func on_battle_route_selected(option_index: int) -> void:
+	if not integration_policy.debug_tools_visible or battle_route_option == null:
+		return
+	_debug_route_override_active = true
 	var requested_mode := StringName(
 		battle_route_option.get_item_metadata(option_index)
 	)
 	battle_router.set_mode(requested_mode)
 	if battle_router.current_mode == BattleRouterScript.MODE_V1:
-		battle_route_status_label.text = "V1为默认正式路径；遭遇、奖励与进度保持原流程"
+		_set_route_status("V1为默认正式路径；遭遇、奖励与进度保持原流程")
 	elif battle_router.current_mode == BattleRouterScript.MODE_V2_SETTLEMENT_VALIDATION:
-		battle_route_status_label.text = "V2正式结算验证：仅真实未解决遭遇可用，会改变测试存档"
+		_set_route_status("V2正式结算验证：仅真实未解决遭遇可用，会改变测试存档")
 	else:
-		battle_route_status_label.text = "V2预览读取当前正式队伍与最终属性，但不执行结算"
+		_set_route_status("V2预览读取当前正式队伍与最终属性，但不执行结算")
 
 
 func on_battle_route_start_pressed() -> void:
+	if not integration_policy.debug_tools_visible:
+		return
 	if game_state == null:
-		battle_route_status_label.text = "GameState不可用，无法启动战斗"
+		_set_route_status("GameState不可用，无法启动战斗")
 		return
 	if game_state.is_battle_active():
-		battle_route_status_label.text = "V1正式战斗进行中，不能并行启动预览"
+		_set_route_status("V1正式战斗进行中，不能并行启动预览")
 		return
 	var source_context := build_battle_route_source_context()
 	if battle_router.current_mode == BattleRouterScript.MODE_V2_SETTLEMENT_VALIDATION:
@@ -91,6 +109,8 @@ func on_battle_route_start_pressed() -> void:
 
 
 func confirm_settlement_route_start() -> void:
+	if not integration_policy.debug_tools_visible:
+		return
 	var source_context := _pending_settlement_context.duplicate(true)
 	_pending_settlement_context = {}
 	_start_selected_route(source_context)
@@ -99,9 +119,16 @@ func confirm_settlement_route_start() -> void:
 func route_formal_encounter(encounter_id: StringName) -> bool:
 	var source_context := build_battle_route_source_context()
 	if StringName(source_context.get("encounter_id", &"")) != encounter_id:
-		battle_route_status_label.text = "正式遭遇上下文与当前节点不一致"
+		_set_route_status("正式遭遇上下文与当前节点不一致")
 		return false
-	if battle_router.current_mode == BattleRouterScript.MODE_V2_SETTLEMENT_VALIDATION:
+	var has_debug_route_override: bool = integration_policy.debug_tools_visible \
+		and (
+			_debug_route_override_active
+			or battle_router.current_mode != BattleRouterScript.MODE_V1
+		)
+	if has_debug_route_override \
+			and battle_router.current_mode \
+				== BattleRouterScript.MODE_V2_SETTLEMENT_VALIDATION:
 		_pending_settlement_context = source_context.duplicate(true)
 		settlement_confirmation_dialog.dialog_text = (
 			"已抵达真实战斗节点。V2正式结算验证会改变测试存档中的经验、"
@@ -109,6 +136,36 @@ func route_formal_encounter(encounter_id: StringName) -> bool:
 		)
 		settlement_confirmation_dialog.popup_centered()
 		return true
+	if has_debug_route_override:
+		_start_selected_route(source_context)
+		return true
+	var resolution: Dictionary = integration_policy.resolve_formal_route(
+		encounter_id
+	)
+	if not bool(resolution.get("ok", false)):
+		_report_formal_route_failure("; ".join(
+			resolution.get("errors", ["正式战斗路由配置无效"])
+		))
+		return false
+	var resolved_entry: Dictionary = resolution.get("entry", {})
+	var configured_node_id := StringName(
+		resolved_entry.get("encounter_node_id", &"")
+	)
+	if configured_node_id != &"" and configured_node_id != StringName(
+		source_context.get("encounter_node_id", &"")
+	):
+		_report_formal_route_failure("正式路由表节点与当前远征节点不一致")
+		return false
+	var selected_route := StringName(
+		resolution.get("route", IntegrationPolicyScript.IMPLEMENTATION_V1)
+	)
+	if selected_route == IntegrationPolicyScript.IMPLEMENTATION_V2:
+		source_context["v2_battle_id"] = StringName(
+			resolved_entry.get("battle_id", &"")
+		)
+		battle_router.set_mode(BattleRouterScript.MODE_V2_FORMAL)
+	else:
+		battle_router.set_mode(BattleRouterScript.MODE_V1)
 	_start_selected_route(source_context)
 	return true
 
@@ -117,30 +174,31 @@ func _start_selected_route(source_context: Dictionary) -> void:
 	if battle_router.current_mode != BattleRouterScript.MODE_V1:
 		var party_creation := FormalPartySource.build_party_snapshots(game_state)
 		if not bool(party_creation.get("ok", false)):
-			battle_route_status_label.text = "; ".join(
+			_set_route_status("; ".join(
 				party_creation.get("errors", ["正式队伍无法构建"])
-			)
+			))
 			return
 		source_context["party_snapshots"] = party_creation["value"].duplicate(true)
 		last_v2_party_debug_text = format_party_debug(
 			party_creation["value"]
 		)
-		battle_route_status_label.text = last_v2_party_debug_text
+		if integration_policy.debug_tools_visible:
+			_set_route_status(last_v2_party_debug_text)
 	var route_result: Dictionary = battle_router.route_selected_battle(
 		game_state,
 		source_context
 	)
 	if not bool(route_result.get("ok", false)):
-		battle_route_status_label.text = "; ".join(
+		_set_route_status("; ".join(
 			route_result.get("errors", ["战斗入口启动失败"])
-		)
+		))
 		return
 	if StringName(route_result.get("route", &"")) == BattleRouterScript.MODE_V1:
-		battle_route_status_label.text = "已沿原GameState/BattleSystem入口启动V1"
+		_set_route_status("已沿原GameState/BattleSystem入口启动V1")
 		return
 	var request: Dictionary = route_result.get("request", {}).duplicate(true)
 	_active_v2_mode = StringName(route_result.get("route", &""))
-	if _active_v2_mode == BattleRouterScript.MODE_V2_SETTLEMENT_VALIDATION:
+	if _is_settlement_mode(_active_v2_mode):
 		var opening: Dictionary = settlement_service.open_session(
 			game_state,
 			request
@@ -148,7 +206,7 @@ func _start_selected_route(source_context: Dictionary) -> void:
 		if not bool(opening.get("ok", false)):
 			var message := "; ".join(opening.get("errors", ["正式结算会话启动失败"]))
 			battle_router.fail_active_session(message)
-			battle_route_status_label.text = message
+			_set_route_status(message)
 			_active_v2_mode = &""
 			return
 	_start_v2_preview_scene(request)
@@ -236,21 +294,33 @@ func format_v2_preview_summary(
 	return "\n".join(lines)
 
 
-func format_v2_settlement_receipt(receipt: Dictionary) -> String:
+func format_v2_settlement_receipt(
+	receipt: Dictionary,
+	include_debug_diagnostics := true,
+	raw_result: Dictionary = {},
+	request: Dictionary = {},
+	settlement_plan: Dictionary = {}
+) -> String:
 	var durability: Dictionary = receipt.get("village_durability", {})
 	var lines := PackedStringArray([
-		"settlement_id：%s" % String(receipt.get("settlement_id", "")),
 		"结果：%s" % (
 			"胜利" if String(receipt.get("outcome", "")) == "victory" else "失败"
 		),
-		"V2原始判定：%s｜村庄耐久：%d/%d｜倒下角色：%d" % [
+		"正式参战角色经验：",
+	])
+	if include_debug_diagnostics:
+		lines.insert(0, "settlement_id：%s" % String(
+			receipt.get("settlement_id", "")
+		))
+		lines.insert(2, "V2原始判定：%s｜村庄耐久：%d/%d｜倒下角色：%d" % [
 			String(receipt.get("v2_outcome", "")),
 			int(durability.get("remaining", 0)),
 			int(durability.get("maximum", 0)),
 			int(receipt.get("downed_participant_count", 0)),
-		],
-		"正式参战角色经验：",
-	])
+		])
+		lines.insert(1, "battle_session_id：%s" % String(
+			receipt.get("battle_session_id", "")
+		))
 	for experience_result: Dictionary in receipt.get("experience_results", []):
 		lines.append("- %s（%s）经验 +%d%s" % [
 			String(experience_result.get("display_name", "")),
@@ -286,21 +356,42 @@ func format_v2_settlement_receipt(receipt: Dictionary) -> String:
 		"继续" if bool(receipt.get("expedition_continues", false)) else "已结束",
 		"远征界面" if String(receipt.get("return_view", "")) == "expedition" else "村庄",
 	])
-	lines.append("")
-	lines.append(String(receipt.get(
-		"message",
-		"V2-8D正式结算已应用，未自动保存"
-	)))
+	if include_debug_diagnostics:
+		lines.append("")
+		if not request.is_empty():
+			lines.append("V2 battle ID：%s" % String(
+				request.get("battle_config_ref", {}).get("wave_config_id", "")
+			))
+			lines.append("正式属性映射：%s" % last_v2_party_debug_text)
+		if not settlement_plan.is_empty():
+			lines.append("计划指纹：%s" % JSON.stringify(
+				settlement_plan
+			).sha256_text())
+		if not raw_result.is_empty():
+			lines.append("原始统计：%s" % JSON.stringify(
+				raw_result.get("battle_statistics", {})
+			))
+		lines.append(String(receipt.get(
+			"message",
+			"V2正式结算已应用，未自动保存"
+		)))
 	return "\n".join(lines)
 
 
-func format_v2_aborted_summary(result: Dictionary) -> String:
-	return "\n".join(PackedStringArray([
-		"battle_session_id：%s" % String(result.get("battle_session_id", "")),
+func format_v2_aborted_summary(
+	result: Dictionary,
+	include_debug_diagnostics := true
+) -> String:
+	var lines := PackedStringArray([
 		"结果：已中止",
 		"未执行正式结算",
 		"未发经验、奖励或伤情；当前遭遇保持未解决并可重新进入。",
-	]))
+	])
+	if include_debug_diagnostics:
+		lines.insert(0, "battle_session_id：%s" % String(
+			result.get("battle_session_id", "")
+		))
+	return "\n".join(lines)
 
 
 func format_party_debug(party: Array) -> String:
@@ -360,10 +451,12 @@ func get_debug_snapshot() -> Dictionary:
 	return {
 		"mode": battle_router.current_mode,
 		"host_exists": is_instance_valid(v2_preview_host),
-		"summary_visible": v2_preview_summary_panel.visible,
+		"summary_visible": v2_preview_summary_panel != null \
+			and v2_preview_summary_panel.visible,
 		"summary_text": last_v2_preview_summary_text,
-		"route_status": battle_route_status_label.text,
+		"route_status": _get_route_status(),
 		"party_debug_text": last_v2_party_debug_text,
+		"integration_policy": integration_policy.get_snapshot(),
 		"router": battle_router.get_snapshot(),
 		"settlement": settlement_service.get_snapshot(),
 	}
@@ -372,79 +465,93 @@ func get_debug_snapshot() -> Dictionary:
 func _start_v2_preview_scene(request: Dictionary) -> void:
 	if is_instance_valid(v2_preview_host):
 		_fail_active_v2_start("V2预览Host重复创建")
-		battle_route_status_label.text = battle_router.last_error
-		return
-	if not ResourceLoader.exists(V2_PREVIEW_HOST_SCENE_PATH):
-		_fail_active_v2_start(
-			"V2预览Host场景加载失败：%s" % V2_PREVIEW_HOST_SCENE_PATH
-		)
-		battle_route_status_label.text = battle_router.last_error
-		return
-	var packed_scene = ResourceLoader.load(V2_PREVIEW_HOST_SCENE_PATH)
-	if not packed_scene is PackedScene:
-		_fail_active_v2_start("V2预览Host资源无效")
-		battle_route_status_label.text = battle_router.last_error
-		return
-	var host = packed_scene.instantiate()
-	if not host is Control or not host.has_method("start_preview"):
-		host.queue_free()
-		_fail_active_v2_start("V2预览Host接口无效")
-		battle_route_status_label.text = battle_router.last_error
+		_set_route_status(battle_router.last_error)
 		return
 	_last_preview_request = request.duplicate(true)
 	v2_preview_summary_panel.visible = false
 	last_v2_preview_summary_text = ""
 	v2_preview_summary_label.text = ""
+	if not ResourceLoader.exists(V2_PREVIEW_HOST_SCENE_PATH):
+		_fail_active_v2_start(
+			"V2预览Host场景加载失败：%s" % V2_PREVIEW_HOST_SCENE_PATH
+		)
+		_set_route_status(battle_router.last_error)
+		return
+	var packed_scene = ResourceLoader.load(V2_PREVIEW_HOST_SCENE_PATH)
+	if not packed_scene is PackedScene:
+		_fail_active_v2_start("V2预览Host资源无效")
+		_set_route_status(battle_router.last_error)
+		return
+	var host = packed_scene.instantiate()
+	if not host is Control or not host.has_method("start_preview"):
+		host.queue_free()
+		_fail_active_v2_start("V2预览Host接口无效")
+		_set_route_status(battle_router.last_error)
+		return
 	v2_preview_host = host
 	overlay_parent.add_child(v2_preview_host)
 	v2_preview_host.preview_finished.connect(on_v2_preview_finished)
 	v2_preview_host.preview_error.connect(on_v2_preview_error)
+	if v2_preview_host.has_method("set_debug_diagnostics_visible"):
+		v2_preview_host.call(
+			"set_debug_diagnostics_visible",
+			integration_policy.debug_tools_visible
+		)
 	var start_result: Dictionary = v2_preview_host.call("start_preview", request)
 	if not bool(start_result.get("ok", false)):
 		var message := "; ".join(
 			start_result.get("errors", ["V2预览场景启动失败"])
 		)
 		_fail_active_v2_start(message)
-		battle_route_status_label.text = message
+		_set_route_status(message)
 		_teardown_v2_preview_host()
 		preview_returned.emit()
 		return
-	if v2_preview_host.has_method("set_party_scale_debug_text"):
+	if integration_policy.debug_tools_visible \
+			and v2_preview_host.has_method("set_party_scale_debug_text"):
 		v2_preview_host.call(
 			"set_party_scale_debug_text",
 			last_v2_party_debug_text
 		)
-	battle_route_option.disabled = true
-	battle_route_start_button.disabled = true
-	battle_route_status_label.text = (
-		"V2正式结算验证运行中：终态将自动结算一次且不会自动保存"
-		if _active_v2_mode == BattleRouterScript.MODE_V2_SETTLEMENT_VALIDATION
-		else "V2正式队伍预览运行中：不会执行正式结算"
-	)
+	if battle_route_option != null:
+		battle_route_option.disabled = true
+	if battle_route_start_button != null:
+		battle_route_start_button.disabled = true
+	if _active_v2_mode == BattleRouterScript.MODE_V2_FORMAL:
+		_set_route_status("阵型塔防战斗运行中")
+	elif _active_v2_mode == BattleRouterScript.MODE_V2_SETTLEMENT_VALIDATION:
+		_set_route_status("V2正式结算验证运行中：终态将自动结算一次且不会自动保存")
+	else:
+		_set_route_status("V2正式队伍预览运行中：不会执行正式结算")
 	preview_started.emit()
 
 
 func _fail_active_v2_start(message: String) -> void:
+	var failed_mode := _active_v2_mode
 	battle_router.fail_active_session(message)
-	if _active_v2_mode == BattleRouterScript.MODE_V2_SETTLEMENT_VALIDATION:
+	if _is_settlement_mode(failed_mode):
 		settlement_service.reject_session(
 			String(_last_preview_request.get("battle_session_id", "")),
 			message
 		)
+	if failed_mode == BattleRouterScript.MODE_V2_FORMAL:
+		_show_v2_failure_summary("战斗暂时无法开始", message)
+	_last_preview_request = {}
+	_active_v2_mode = &""
 
 
 func on_v2_preview_finished(result: Dictionary) -> void:
-	var is_settlement := _active_v2_mode \
-		== BattleRouterScript.MODE_V2_SETTLEMENT_VALIDATION
+	var is_settlement := _is_settlement_mode(_active_v2_mode)
+	var is_formal_route := _active_v2_mode == BattleRouterScript.MODE_V2_FORMAL
 	var acceptance: Dictionary = (
 		battle_router.accept_settlement_result(result)
 		if is_settlement
 		else battle_router.accept_preview_result(result)
 	)
 	if not bool(acceptance.get("ok", false)):
-		battle_route_status_label.text = "; ".join(
+		_set_route_status("; ".join(
 			acceptance.get("errors", ["V2预览结果被拒绝"])
-		)
+		))
 		_teardown_v2_preview_host()
 		_enable_route_controls()
 		preview_returned.emit()
@@ -460,10 +567,13 @@ func on_v2_preview_finished(result: Dictionary) -> void:
 				_handle_settlement_failure(closing)
 				return
 			last_v2_preview_summary_text = format_v2_aborted_summary(
-				normalized_result
+				normalized_result,
+				integration_policy.debug_tools_visible
 			)
-			v2_preview_summary_title.text = "Combat V2 正式结算验证已中止"
-			battle_route_status_label.text = "V2战斗已中止；正式数据未结算"
+			v2_preview_summary_title.text = (
+				"战斗已中止" if is_formal_route else "Combat V2 正式结算验证已中止"
+			)
+			_set_route_status("战斗已中止；正式数据未结算")
 		else:
 			var preparation: Dictionary = settlement_service.prepare_settlement(
 				game_state,
@@ -481,17 +591,23 @@ func on_v2_preview_finished(result: Dictionary) -> void:
 				_handle_settlement_failure(application)
 				return
 			last_v2_preview_summary_text = format_v2_settlement_receipt(
-				application.get("value", {})
+				application.get("value", {}),
+				integration_policy.debug_tools_visible,
+				normalized_result,
+				_last_preview_request,
+				preparation.get("value", {})
 			)
-			v2_preview_summary_title.text = "Combat V2 正式结算回执"
-			battle_route_status_label.text = "V2-8D正式结算已应用，未自动保存"
+			v2_preview_summary_title.text = (
+				"战斗结算" if is_formal_route else "Combat V2 正式结算回执"
+			)
+			_set_route_status("战斗结算已完成")
 	else:
 		last_v2_preview_summary_text = format_v2_preview_summary(
 			normalized_result,
 			_last_preview_request
 		)
 		v2_preview_summary_title.text = "Combat V2 接入预览结果"
-		battle_route_status_label.text = "V2预览已返回；正式数据与进度未结算"
+		_set_route_status("V2预览已返回；正式数据与进度未结算")
 	v2_preview_summary_label.text = last_v2_preview_summary_text
 	_teardown_v2_preview_host()
 	_last_preview_request = {}
@@ -507,8 +623,13 @@ func _handle_settlement_failure(failure: Dictionary) -> void:
 		String(_last_preview_request.get("battle_session_id", "")),
 		message
 	)
-	battle_route_status_label.text = message
-	_show_v2_failure_summary("Combat V2 正式结算被拒绝", message)
+	_set_route_status(message)
+	_show_v2_failure_summary(
+		"战斗结算未完成"
+		if _active_v2_mode == BattleRouterScript.MODE_V2_FORMAL
+		else "Combat V2 正式结算被拒绝",
+		message
+	)
 	_teardown_v2_preview_host()
 	_last_preview_request = {}
 	_active_v2_mode = &""
@@ -518,13 +639,18 @@ func _handle_settlement_failure(failure: Dictionary) -> void:
 
 func on_v2_preview_error(message: String) -> void:
 	battle_router.fail_active_session(message)
-	if _active_v2_mode == BattleRouterScript.MODE_V2_SETTLEMENT_VALIDATION:
+	if _is_settlement_mode(_active_v2_mode):
 		settlement_service.reject_session(
 			String(_last_preview_request.get("battle_session_id", "")),
 			message
 		)
-	battle_route_status_label.text = message
-	_show_v2_failure_summary("Combat V2 运行错误", message)
+	_set_route_status(message)
+	_show_v2_failure_summary(
+		"战斗无法继续"
+		if _active_v2_mode == BattleRouterScript.MODE_V2_FORMAL
+		else "Combat V2 运行错误",
+		message
+	)
 	_teardown_v2_preview_host()
 	_last_preview_request = {}
 	_active_v2_mode = &""
@@ -533,14 +659,21 @@ func on_v2_preview_error(message: String) -> void:
 
 
 func _show_v2_failure_summary(title: String, message: String) -> void:
-	last_v2_preview_summary_text = "\n".join(PackedStringArray([
+	var lines := PackedStringArray([
 		"结果：未执行正式结算",
-		message,
 		"当前遭遇仍未解决，不能前往下一节点；可重新进入该遭遇。",
-	]))
+	])
+	if integration_policy.debug_tools_visible:
+		lines.insert(1, message)
+	last_v2_preview_summary_text = "\n".join(lines)
 	v2_preview_summary_title.text = title
 	v2_preview_summary_label.text = last_v2_preview_summary_text
 	v2_preview_summary_panel.visible = true
+
+
+func _report_formal_route_failure(message: String) -> void:
+	_set_route_status(message)
+	_show_v2_failure_summary("战斗暂时无法开始", message)
 
 
 func _build_route_controls(navigation: HBoxContainer) -> void:
@@ -631,7 +764,7 @@ func _build_summary_panel() -> void:
 	content.add_child(v2_preview_summary_label)
 	var close_button := Button.new()
 	close_button.name = "CloseV2PreviewSummaryButton"
-	close_button.text = "关闭摘要"
+	close_button.text = "关闭"
 	close_button.pressed.connect(close_v2_preview_summary)
 	content.add_child(close_button)
 
@@ -653,8 +786,26 @@ func _build_settlement_confirmation_dialog() -> void:
 
 
 func _enable_route_controls() -> void:
-	battle_route_option.disabled = false
-	battle_route_start_button.disabled = false
+	if battle_route_option != null:
+		battle_route_option.disabled = false
+	if battle_route_start_button != null:
+		battle_route_start_button.disabled = false
+
+
+func _is_settlement_mode(mode: StringName) -> bool:
+	return mode in [
+		BattleRouterScript.MODE_V2_SETTLEMENT_VALIDATION,
+		BattleRouterScript.MODE_V2_FORMAL,
+	]
+
+
+func _set_route_status(message: String) -> void:
+	if battle_route_status_label != null:
+		battle_route_status_label.text = message
+
+
+func _get_route_status() -> String:
+	return battle_route_status_label.text if battle_route_status_label != null else ""
 
 
 func _teardown_v2_preview_host() -> void:

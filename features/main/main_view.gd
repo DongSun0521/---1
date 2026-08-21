@@ -17,6 +17,7 @@ var continue_test_button: Button
 var new_game_button: Button
 var battle_preview_coordinator
 var _preview_return_view := &"village"
+var _formation_defense_integration_policy_override
 
 
 func _ready() -> void:
@@ -109,7 +110,12 @@ func setup_battle_preview_coordinator() -> void:
 	battle_preview_coordinator = FormationDefensePreviewCoordinatorScript.new()
 	battle_preview_coordinator.name = "FormationDefensePreviewCoordinator"
 	add_child(battle_preview_coordinator)
-	battle_preview_coordinator.setup(game_state, $Root/Navigation, self)
+	battle_preview_coordinator.setup(
+		game_state,
+		$Root/Navigation,
+		self,
+		_formation_defense_integration_policy_override
+	)
 	if expedition_view.has_method("set_battle_start_router"):
 		expedition_view.call(
 			"set_battle_start_router",
@@ -117,6 +123,13 @@ func setup_battle_preview_coordinator() -> void:
 		)
 	battle_preview_coordinator.preview_started.connect(on_v2_preview_started)
 	battle_preview_coordinator.preview_returned.connect(on_v2_preview_returned)
+
+
+func set_formation_defense_integration_policy_for_test(policy) -> void:
+	if is_node_ready():
+		push_error("集成策略必须在MainView进入场景树前注入")
+		return
+	_formation_defense_integration_policy_override = policy
 
 
 func show_village() -> void:

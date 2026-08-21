@@ -100,3 +100,7 @@ Host和Router不查找正式单例，也不调用V1完成/结算和`SaveSystem`�
 > 未解决遭遇启动，并在确认警告后通过正式结算服务应用一次结果；本页原有
 > `V2_INTEGRATION_PREVIEW`零写入边界和V1默认值不变。详见
 > [`combat_v2_formal_settlement.md`](combat_v2_formal_settlement.md)。
+
+> V2-8E将以上三种入口集中限制在编辑器/Debug环境；Release不会创建开发控件、占位或
+> 快捷方式。正式遭遇改由默认关闭的运行期策略路由，详见
+> [`combat_v2_main_merge_readiness.md`](combat_v2_main_merge_readiness.md)。

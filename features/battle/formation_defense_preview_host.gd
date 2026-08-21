@@ -27,7 +27,9 @@ var _exit_button: Button
 var _terminal_emitted := false
 var _last_terminal_debug_snapshot: Dictionary = {}
 var _external_party_debug_text := ""
-var _is_settlement_validation := false
+var _is_formal_settlement := false
+var _is_debug_validation := false
+var _show_debug_diagnostics := true
 
 
 func _ready() -> void:
@@ -50,9 +52,14 @@ func start_preview(raw_request: Dictionary) -> Dictionary:
 			)
 		)
 	var request: Dictionary = request_creation["value"]
-	_is_settlement_validation = String(
+	var source_mode := String(
 		request.get("encounter_context", {}).get("source_mode", "")
-	) == "FORMAL_SETTLEMENT_VALIDATION"
+	)
+	_is_debug_validation = source_mode == "FORMAL_SETTLEMENT_VALIDATION"
+	_is_formal_settlement = source_mode in [
+		"FORMAL_SETTLEMENT_VALIDATION",
+		"FORMAL_EXPEDITION_ROUTE",
+	]
 	var wave_config_id := StringName(
 		request["battle_config_ref"].get("wave_config_id", &"")
 	)
@@ -117,22 +124,28 @@ func start_preview(raw_request: Dictionary) -> Dictionary:
 		_cleanup_runtime()
 		return _failure("V2预览战斗启动失败")
 	_prototype.battle_finished.connect(_on_prototype_battle_finished)
-	_status_label.text = "%s｜%d人｜Session %s" % [
-		(
-			"V2正式结算验证（会改变测试存档）"
-			if _is_settlement_validation
-			else "V2正式队伍预览（不结算）"
-		),
+	var mode_text := "V2正式队伍预览（不结算）"
+	if _is_debug_validation:
+		mode_text = "V2正式结算验证（会改变测试存档）"
+	elif _is_formal_settlement:
+		mode_text = "阵型塔防战斗"
+	_status_label.text = "%s｜%d人" % [
+		mode_text,
 		active_request.get("party", []).size(),
-		String(active_request.get("battle_session_id", "")),
 	]
-	_exit_button.text = "中止战斗" if _is_settlement_validation else "退出预览"
+	if _show_debug_diagnostics:
+		_status_label.text += "｜Session %s" % String(
+			active_request.get("battle_session_id", "")
+		)
+	_exit_button.text = "中止战斗" if _is_formal_settlement else "退出预览"
 	_exit_button.tooltip_text = (
 		"安全中止并返回；不执行正式结算，当前遭遇保持可重试"
-		if _is_settlement_validation
+		if _is_formal_settlement
 		else "安全中止本局并返回；不会执行正式结算"
 	)
-	_status_label.tooltip_text = get_party_debug_text()
+	_status_label.tooltip_text = (
+		get_party_debug_text() if _show_debug_diagnostics else ""
+	)
 	visible = true
 	set_process_input(true)
 	return {
@@ -146,6 +159,10 @@ func abort_preview() -> bool:
 	if active_request.is_empty() or _terminal_emitted:
 		return false
 	return _finish_preview(BattleContract.OUTCOME_ABORTED)
+
+
+func set_debug_diagnostics_visible(visible_in_debug: bool) -> void:
+	_show_debug_diagnostics = visible_in_debug
 
 
 func advance_for_test(delta: float) -> void:
@@ -179,9 +196,11 @@ func get_last_terminal_debug_snapshot() -> Dictionary:
 
 
 func set_party_scale_debug_text(debug_text: String) -> void:
-	_external_party_debug_text = debug_text
+	_external_party_debug_text = debug_text if _show_debug_diagnostics else ""
 	if is_instance_valid(_status_label):
-		_status_label.tooltip_text = get_party_debug_text()
+		_status_label.tooltip_text = (
+			get_party_debug_text() if _show_debug_diagnostics else ""
+		)
 
 
 func get_snapshot() -> Dictionary:
@@ -441,7 +460,8 @@ func _cleanup_runtime() -> void:
 		_prototype.queue_free()
 	_prototype = null
 	active_request = {}
-	_is_settlement_validation = false
+	_is_formal_settlement = false
+	_is_debug_validation = false
 	visible = false
 	set_process_input(false)
 

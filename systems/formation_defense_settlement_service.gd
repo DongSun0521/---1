@@ -9,6 +9,8 @@ const BattleAdapter := preload(
 )
 
 const SOURCE_MODE := "FORMAL_SETTLEMENT_VALIDATION"
+const FORMAL_ROUTE_SOURCE_MODE := "FORMAL_EXPEDITION_ROUTE"
+const VALID_SOURCE_MODES := [SOURCE_MODE, FORMAL_ROUTE_SOURCE_MODE]
 const STATE_UNSEEN := &"UNSEEN"
 const STATE_PROCESSING := &"PROCESSING"
 const STATE_APPLIED := &"APPLIED"
@@ -336,8 +338,8 @@ func _validate_formal_context(
 	if not errors.is_empty():
 		return errors
 	var context: Dictionary = request.get("encounter_context", {})
-	if String(context.get("source_mode", "")) != SOURCE_MODE:
-		errors.append("请求不是V2正式结算验证来源")
+	if String(context.get("source_mode", "")) not in VALID_SOURCE_MODES:
+		errors.append("请求不是受支持的V2正式结算来源")
 	if not bool(game_state.call("is_expedition_active")):
 		errors.append("当前没有活动远征")
 		return errors

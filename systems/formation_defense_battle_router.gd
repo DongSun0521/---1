@@ -14,10 +14,12 @@ const PreviewRequestBuilder := preload(
 const MODE_V1 := &"V1"
 const MODE_V2_INTEGRATION_PREVIEW := &"V2_INTEGRATION_PREVIEW"
 const MODE_V2_SETTLEMENT_VALIDATION := &"V2_SETTLEMENT_VALIDATION"
+const MODE_V2_FORMAL := &"V2_FORMAL"
 const VALID_MODES: Array[StringName] = [
 	MODE_V1,
 	MODE_V2_INTEGRATION_PREVIEW,
 	MODE_V2_SETTLEMENT_VALIDATION,
+	MODE_V2_FORMAL,
 ]
 
 var current_mode: StringName = MODE_V1
@@ -59,6 +61,8 @@ func route_selected_battle(
 		return _start_v2_preview(source_context)
 	if current_mode == MODE_V2_SETTLEMENT_VALIDATION:
 		return _start_v2_settlement(source_context)
+	if current_mode == MODE_V2_FORMAL:
+		return _start_v2_formal(source_context)
 	set_mode(current_mode)
 	return _failure(last_error)
 
@@ -68,7 +72,12 @@ func accept_preview_result(raw_result: Dictionary) -> Dictionary:
 
 
 func accept_settlement_result(raw_result: Dictionary) -> Dictionary:
-	return _accept_active_result(raw_result, MODE_V2_SETTLEMENT_VALIDATION)
+	if active_session_mode not in [
+		MODE_V2_SETTLEMENT_VALIDATION,
+		MODE_V2_FORMAL,
+	]:
+		return _reject_result("V2结果提交到了错误的结算会话模式")
+	return _accept_active_result(raw_result, active_session_mode)
 
 
 func _accept_active_result(
@@ -215,6 +224,29 @@ func _start_v2_settlement(source_context: Dictionary) -> Dictionary:
 		"ok": true,
 		"errors": PackedStringArray(),
 		"route": MODE_V2_SETTLEMENT_VALIDATION,
+		"request": active_request.duplicate(true),
+	}
+
+
+func _start_v2_formal(source_context: Dictionary) -> Dictionary:
+	var session_id := _next_session_id()
+	var request_creation := PreviewRequestBuilder.build_formal_route_request(
+		session_id,
+		source_context,
+		StringName(source_context.get("v2_battle_id", &""))
+	)
+	if not bool(request_creation.get("ok", false)):
+		last_error = "V2正式路由请求无效：%s" % "; ".join(
+			request_creation.get("errors", [])
+		)
+		return request_creation
+	active_request = request_creation["value"].duplicate(true)
+	active_session_mode = MODE_V2_FORMAL
+	last_error = ""
+	return {
+		"ok": true,
+		"errors": PackedStringArray(),
+		"route": MODE_V2_FORMAL,
 		"request": active_request.duplicate(true),
 	}
 

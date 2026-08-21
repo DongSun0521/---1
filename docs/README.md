@@ -46,6 +46,7 @@
 | [`combat_v2_dual_battle_entry.md`](combat_v2_dual_battle_entry.md) | Combat V2-8B V1/V2双轨入口、预览会话、零写入边界与人工检查 |
 | [`combat_v2_formal_party_mapping.md`](combat_v2_formal_party_mapping.md) | Combat V2-8C/R 正式队伍读取、属性尺度适配、动态角色与零写入验证 |
 | [`combat_v2_formal_settlement.md`](combat_v2_formal_settlement.md) | Combat V2-8D 正式结算验证、V1语义表与会话内幂等边界 |
+| [`combat_v2_main_merge_readiness.md`](combat_v2_main_merge_readiness.md) | Combat V2-8E Debug/Release隔离、正式遭遇支持矩阵、默认关闭路由与主干回滚准备 |
 
 Stage 8～10 的实现和测试入口没有单独阶段交接文件，已集中整理在
 [`codex_handoff_overall.md`](codex_handoff_overall.md)。

@@ -85,3 +85,7 @@ session置为`CLOSED`，不消费正式结算ID。
 
 Lv.50游侠/医生攻速在V2实时模型中的成长风险仍是正式替换V1前的阻塞事项，V2-8D没有
 修改、封顶或顺带处理该问题。
+
+> V2-8E保留本页Debug结算验证映射以继续回归V2-8D语义，但正式投放不再使用该映射。
+> 正式路由只读取集中支持矩阵；森林遭遇技术上支持V2，Boss明确保持V1，且总开关默认
+> 关闭。详见[`combat_v2_main_merge_readiness.md`](combat_v2_main_merge_readiness.md)。

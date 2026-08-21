@@ -14,10 +14,12 @@ const PREVIEW_ENEMY_PROFILE_IDS: Array[StringName] = [
 	&"rush_raider",
 ]
 const SETTLEMENT_SOURCE_MODE := &"FORMAL_SETTLEMENT_VALIDATION"
+# V2-8D的人工结算验证映射只服务Debug工具，不是正式遭遇支持矩阵。
 const SETTLEMENT_WAVE_CONFIG_BY_ENCOUNTER := {
 	&"forest_slime_pair": PREVIEW_WAVE_CONFIG_ID,
 	&"ruins_guard": PREVIEW_WAVE_CONFIG_ID,
 }
+const FORMAL_ROUTE_SOURCE_MODE := &"FORMAL_EXPEDITION_ROUTE"
 
 
 static func build_preview_request(
@@ -79,9 +81,56 @@ static func build_settlement_request(
 	var battle_config := PrototypeConfig.get_wave_battle_config(wave_config_id)
 	if battle_config.is_empty():
 		return _failure("V2正式结算验证battle配置缺失")
+	return _build_formal_request(
+		battle_session_id,
+		source_context,
+		wave_config_id,
+		SETTLEMENT_SOURCE_MODE,
+		"V2正式结算验证"
+	)
+
+
+static func build_formal_route_request(
+	battle_session_id: String,
+	source_context: Dictionary,
+	wave_config_id: StringName
+) -> Dictionary:
+	var encounter_id := StringName(source_context.get("encounter_id", &""))
+	var encounter_node_id := StringName(
+		source_context.get("encounter_node_id", &"")
+	)
+	if encounter_id == &"" or encounter_node_id == &"":
+		return _failure("V2正式路由需要真实遭遇与远征节点")
+	if wave_config_id == &"":
+		return _failure("V2正式路由缺少battle配置ID")
+	if PrototypeConfig.get_wave_battle_config(wave_config_id).is_empty():
+		return _failure("V2正式路由battle配置缺失")
+	return _build_formal_request(
+		battle_session_id,
+		source_context,
+		wave_config_id,
+		FORMAL_ROUTE_SOURCE_MODE,
+		"V2正式路由"
+	)
+
+
+static func _build_formal_request(
+	battle_session_id: String,
+	source_context: Dictionary,
+	wave_config_id: StringName,
+	source_mode: StringName,
+	context_name: String
+) -> Dictionary:
+	var encounter_id := StringName(source_context.get("encounter_id", &""))
+	var encounter_node_id := StringName(
+		source_context.get("encounter_node_id", &"")
+	)
+	var battle_config := PrototypeConfig.get_wave_battle_config(wave_config_id)
+	if battle_config.is_empty():
+		return _failure("%sbattle配置缺失" % context_name)
 	var raw_party_snapshots = source_context.get("party_snapshots", [])
 	if not raw_party_snapshots is Array or raw_party_snapshots.is_empty():
-		return _failure("V2正式结算验证需要正式参战队伍快照")
+		return _failure("%s需要正式参战队伍快照" % context_name)
 	return BattleAdapter.build_battle_request_snapshot({
 		"battle_session_id": battle_session_id,
 		"encounter_id": encounter_id,
@@ -92,7 +141,7 @@ static func build_settlement_request(
 			"enemy_profile_ids": PREVIEW_ENEMY_PROFILE_IDS.duplicate(),
 		},
 		"encounter_context": {
-			"source_mode": SETTLEMENT_SOURCE_MODE,
+			"source_mode": source_mode,
 			"encounter_node_id": String(encounter_node_id),
 		},
 	})
