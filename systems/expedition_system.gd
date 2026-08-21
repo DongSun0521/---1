@@ -349,9 +349,13 @@ func can_move_to_next_node(game_state) -> bool:
 		return false
 	if game_state.is_battle_active():
 		return false
+	var current_node_id := StringName(state.get("current_node_id", EMPTY_NODE_ID))
+	if get_node_encounter_id(current_node_id) != EMPTY_NODE_ID \
+			and not is_battle_node_cleared(game_state, current_node_id):
+		return false
 	if int(state["carried_rations"]) < 1:
 		return false
-	return get_next_node_id(state["current_node_id"]) != EMPTY_NODE_ID
+	return get_next_node_id(current_node_id) != EMPTY_NODE_ID
 
 
 func can_gather_current_node(game_state) -> bool:

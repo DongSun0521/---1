@@ -1298,7 +1298,9 @@ func start_expedition(carried_food: int, carried_medicine: int, selected_meal_id
 	return true
 
 
-func move_to_next_expedition_node() -> bool:
+func move_to_next_expedition_node(
+	battle_start_router: Callable = Callable()
+) -> bool:
 	var action_report: Dictionary = expedition_system.move_to_next_node(self)
 	if action_report.is_empty():
 		return false
@@ -1306,7 +1308,10 @@ func move_to_next_expedition_node() -> bool:
 	emit_after_day_advanced()
 	expedition_action_completed.emit(action_report.duplicate(true))
 	if bool(action_report.get("starts_battle", false)):
-		start_battle(action_report["encounter_id"])
+		if battle_start_router.is_valid():
+			battle_start_router.call(StringName(action_report["encounter_id"]))
+		else:
+			start_battle(action_report["encounter_id"])
 	return true
 
 
@@ -1445,35 +1450,200 @@ func complete_pending_battle_result() -> bool:
 	return true
 
 
+func get_formal_battle_settlement_profile(encounter_id: StringName) -> Dictionary:
+	var profile: Dictionary = battle_system.get_encounter_settlement_profile(
+		encounter_id
+	)
+	if profile.is_empty():
+		return {}
+	profile["experience_victory"] = (
+		BATTLE_EXPERIENCE_BOSS
+		if bool(profile.get("is_boss", false))
+		else BATTLE_EXPERIENCE_NORMAL
+	)
+	profile["experience_defeat"] = BATTLE_EXPERIENCE_DEFEAT
+	return profile
+
+
+func validate_formation_defense_settlement_plan(
+	plan: Dictionary
+) -> PackedStringArray:
+	var errors := PackedStringArray()
+	var outcome := String(plan.get("outcome", ""))
+	if outcome not in ["victory", "failure"]:
+		errors.append("formal settlement outcome must be victory or failure")
+	var v2_outcome := String(plan.get("v2_outcome", ""))
+	var expected_v2_outcome := (
+		"VICTORY" if outcome == "victory" else "DEFEAT"
+	)
+	if v2_outcome != expected_v2_outcome:
+		errors.append("formal settlement V2 outcome does not match")
+	var village_durability = plan.get("village_durability", {})
+	if not village_durability is Dictionary:
+		errors.append("formal settlement village durability must be a dictionary")
+	else:
+		var durability_remaining := int(village_durability.get("remaining", -1))
+		var durability_maximum := int(village_durability.get("maximum", 0))
+		if durability_maximum <= 0 or durability_remaining < 0 \
+				or durability_remaining > durability_maximum:
+			errors.append("formal settlement village durability is outside range")
+		elif outcome == "victory" and durability_remaining <= 0:
+			errors.append("formal settlement victory requires surviving village durability")
+		elif outcome == "failure" and durability_remaining != 0:
+			errors.append("formal settlement failure requires zero village durability")
+	var encounter_id := StringName(plan.get("encounter_id", &""))
+	var node_id := StringName(plan.get("node_id", &""))
+	var profile := get_formal_battle_settlement_profile(encounter_id)
+	if profile.is_empty():
+		errors.append("formal settlement encounter does not exist")
+	else:
+		if StringName(profile.get("node_id", &"")) != node_id:
+			errors.append("formal settlement encounter node does not match")
+		if bool(profile.get("is_boss", false)) != bool(plan.get("is_boss", false)):
+			errors.append("formal settlement boss flag does not match")
+		var rewards: Dictionary = plan.get("rewards", {})
+		for reward_id: String in ["ore", "herb", "core"]:
+			var expected_reward := (
+				int(profile.get("reward_%s" % reward_id, 0))
+				if outcome == "victory"
+				else 0
+			)
+			if int(rewards.get(reward_id, -1)) != int(
+				expected_reward
+			):
+				errors.append("formal settlement %s reward does not match" % reward_id)
+		var expected_experience := int(profile.get(
+			"experience_victory" if outcome == "victory" else "experience_defeat",
+			-1
+		))
+		if int(plan.get("experience_per_character", -1)) != expected_experience:
+			errors.append("formal settlement experience does not match")
+	if not is_expedition_active():
+		errors.append("formal settlement requires an active expedition")
+	else:
+		if StringName(expedition_state.get("current_node_id", &"")) != node_id:
+			errors.append("formal settlement current expedition node does not match")
+		if get_current_node_encounter_id() != encounter_id:
+			errors.append("formal settlement current encounter does not match")
+		if is_current_battle_node_cleared():
+			errors.append("formal settlement encounter is already cleared")
+	var participant_ids = plan.get("participant_ids", [])
+	if not participant_ids is Array or participant_ids.is_empty() \
+			or participant_ids.size() > Stage12Config.MAX_PARTY_SIZE:
+		errors.append("formal settlement participant IDs must contain 1 to 4 members")
+	else:
+		var seen_ids: Array[StringName] = []
+		for raw_character_id in participant_ids:
+			var character_id := StringName(raw_character_id)
+			var record = character_roster.get_character(character_id)
+			if character_id == &"" or seen_ids.has(character_id):
+				errors.append("formal settlement participant IDs must be unique")
+			elif record == null or not record.is_combat_character():
+				errors.append("formal settlement participant is not a combat character")
+			seen_ids.append(character_id)
+	var runtime_updates = plan.get("runtime_hp_updates", [])
+	if not runtime_updates is Array \
+			or runtime_updates.size() != participant_ids.size():
+		errors.append("formal settlement runtime HP updates must match participants")
+	else:
+		var update_ids: Array[StringName] = []
+		var downed_count := 0
+		for raw_update in runtime_updates:
+			if not raw_update is Dictionary:
+				errors.append("formal settlement runtime HP update must be a dictionary")
+				continue
+			var character_id := StringName(raw_update.get("character_id", &""))
+			var max_hp := int(get_final_combat_stats(character_id).get("max_hp", 0))
+			var current_hp := int(raw_update.get("current_hp", -1))
+			if character_id not in participant_ids or update_ids.has(character_id):
+				errors.append("formal settlement runtime HP update ID does not match")
+			if max_hp <= 0 or current_hp < 0 or current_hp > max_hp:
+				errors.append("formal settlement runtime HP update is outside range")
+			if bool(raw_update.get("is_down", false)) != (current_hp <= 0):
+				errors.append("formal settlement down state does not match HP")
+			if bool(raw_update.get("is_down", false)):
+				downed_count += 1
+			update_ids.append(character_id)
+		if int(plan.get("downed_participant_count", -1)) != downed_count:
+			errors.append("formal settlement downed participant count does not match")
+	return errors
+
+
+func apply_formation_defense_settlement_plan(plan: Dictionary) -> Dictionary:
+	var errors := validate_formation_defense_settlement_plan(plan)
+	if not errors.is_empty():
+		return {"ok": false, "errors": errors, "value": {}}
+	for update: Dictionary in plan.get("runtime_hp_updates", []):
+		var character_id := StringName(update.get("character_id", &""))
+		var runtime_state = character_runtime_states.get(character_id, null)
+		runtime_state.current_hp = int(update.get("current_hp", 0))
+		character_runtime_states[character_id] = runtime_state
+		character_runtime_state_changed.emit(character_id)
+	rebuild_adventurers_from_character_data(false)
+
+	var participant_ids: Array = plan.get("participant_ids", []).duplicate()
+	var experience_reward := int(plan.get("experience_per_character", 0))
+	var experience_results := _grant_battle_experience_to_character_ids(
+		participant_ids,
+		experience_reward
+	)
+	_emit_battle_experience_results(experience_results)
+	var rewards: Dictionary = plan.get("rewards", {})
+	var result := {
+		"outcome": String(plan.get("outcome", "")),
+		"encounter_id": StringName(plan.get("encounter_id", &"")),
+		"node_id": StringName(plan.get("node_id", &"")),
+		"party_states": [],
+		"reward_ore": int(rewards.get("ore", 0)),
+		"reward_herb": int(rewards.get("herb", 0)),
+		"reward_core": int(rewards.get("core", 0)),
+		"is_boss": bool(plan.get("is_boss", false)),
+		"experience_reward": experience_reward,
+		"experience_results": experience_results,
+		"experience_processed": true,
+		"stage12f_result_processed": true,
+	}
+	var outcome_report := _apply_formal_battle_outcome(
+		result,
+		participant_ids
+	)
+	result["character_injury_results"] = outcome_report.get(
+		"character_injury_results",
+		[]
+	).duplicate(true)
+	result["expedition_report"] = outcome_report.get(
+		"expedition_report",
+		{}
+	).duplicate(true)
+	result["settlement_id"] = String(plan.get("settlement_id", ""))
+	result["battle_session_id"] = String(plan.get("battle_session_id", ""))
+	result["battle_id"] = String(plan.get("battle_id", ""))
+	result["v2_outcome"] = String(plan.get("v2_outcome", ""))
+	result["village_durability"] = plan.get(
+		"village_durability",
+		{}
+	).duplicate(true)
+	result["downed_participant_count"] = int(
+		plan.get("downed_participant_count", 0)
+	)
+	result["node_completed"] = String(result["outcome"]) == "victory"
+	result["expedition_continues"] = is_expedition_active()
+	result["return_view"] = "expedition" if is_expedition_active() else "village"
+	result["message"] = "V2-8D正式结算已应用，未自动保存"
+	last_battle_result = result.duplicate(true)
+	battle_state_changed.emit()
+	battle_finished.emit(result.duplicate(true))
+	state_changed.emit()
+	return {"ok": true, "errors": PackedStringArray(), "value": result}
+
+
 func process_battle_result(result: Dictionary) -> void:
 	if bool(result.get("stage12f_result_processed", false)):
 		last_battle_result = result.duplicate(true)
 		return
 	_grant_battle_result_experience(result)
 	last_battle_result = result.duplicate(true)
-	if String(result["outcome"]) == "victory":
-		statistics["total_battles_won"] = int(statistics.get("total_battles_won", 0)) + 1
-		expedition_system.apply_battle_victory(self, result)
-		if bool(result.get("is_boss", false)):
-			boss_defeated = true
-			boss_defeated_changed.emit()
-		supplies_changed.emit()
-		expedition_state_changed.emit()
-	else:
-		var report: Dictionary = expedition_system.apply_battle_failure(self, result)
-		statistics["total_failed_expeditions"] = int(statistics.get("total_failed_expeditions", 0)) + 1
-		var injury_results: Array = hospital_system.process_expedition_injuries(self, true)
-		report["character_injury_results"] = injury_results.duplicate(true)
-		report["team_injury_summary"] = get_team_injury_summary()
-		last_expedition_report = report.duplicate(true)
-		emit_injury_result_signals(injury_results)
-		clear_expedition_meal_bonus()
-		restore_character_runtime_states_full()
-		rebuild_adventurers_from_character_data(false)
-		emit_resources_changed()
-		supplies_changed.emit()
-		expedition_state_changed.emit()
-		expedition_ended.emit(report.duplicate(true))
+	_apply_formal_battle_outcome(result)
 
 	battle_state_changed.emit()
 	result["stage12f_result_processed"] = true
@@ -2615,19 +2785,44 @@ func _grant_battle_result_experience(result: Dictionary) -> void:
 	var experience_reward := BATTLE_EXPERIENCE_DEFEAT
 	if String(result.get("outcome", "")) == "victory":
 		experience_reward = BATTLE_EXPERIENCE_BOSS if bool(result.get("is_boss", false)) else BATTLE_EXPERIENCE_NORMAL
-	var experience_results: Array = []
 	var awarded_ids: Array[StringName] = []
 	for party_unit: Dictionary in result.get("party_states", []):
 		var character_id := StringName(party_unit.get("character_id", party_unit.get("unit_id", &"")))
 		if character_id == &"" or awarded_ids.has(character_id):
 			continue
 		awarded_ids.append(character_id)
-		var experience_result := grant_character_experience(character_id, experience_reward, false)
-		if bool(experience_result.get("success", false)):
-			experience_results.append(experience_result)
+	var experience_results := _grant_battle_experience_to_character_ids(
+		awarded_ids,
+		experience_reward
+	)
 	result["experience_reward"] = experience_reward
 	result["experience_results"] = experience_results
 	result["experience_processed"] = true
+	_emit_battle_experience_results(experience_results)
+
+
+func _grant_battle_experience_to_character_ids(
+	character_ids: Array,
+	experience_reward: int
+) -> Array:
+	var experience_results: Array = []
+	var awarded_ids: Array[StringName] = []
+	for raw_character_id in character_ids:
+		var character_id := StringName(raw_character_id)
+		if character_id == &"" or awarded_ids.has(character_id):
+			continue
+		awarded_ids.append(character_id)
+		var experience_result := grant_character_experience(
+			character_id,
+			experience_reward,
+			false
+		)
+		if bool(experience_result.get("success", false)):
+			experience_results.append(experience_result)
+	return experience_results
+
+
+func _emit_battle_experience_results(experience_results: Array) -> void:
 	if experience_results.is_empty():
 		return
 	rebuild_adventurers_from_character_data(false)
@@ -2637,6 +2832,54 @@ func _grant_battle_result_experience(result: Dictionary) -> void:
 		character_data_changed.emit(character_id)
 		character_runtime_state_changed.emit(character_id)
 		character_final_stats_changed.emit(character_id)
+
+
+func _apply_formal_battle_outcome(
+	result: Dictionary,
+	injury_character_ids: Array = []
+) -> Dictionary:
+	if String(result.get("outcome", "")) == "victory":
+		statistics["total_battles_won"] = int(
+			statistics.get("total_battles_won", 0)
+		) + 1
+		expedition_system.apply_battle_victory(self, result)
+		if bool(result.get("is_boss", false)):
+			boss_defeated = true
+			boss_defeated_changed.emit()
+		supplies_changed.emit()
+		expedition_state_changed.emit()
+		return {
+			"character_injury_results": [],
+			"expedition_report": {},
+		}
+	var report: Dictionary = expedition_system.apply_battle_failure(self, result)
+	statistics["total_failed_expeditions"] = int(
+		statistics.get("total_failed_expeditions", 0)
+	) + 1
+	var injury_results: Array = (
+		hospital_system.process_expedition_injuries(self, true)
+		if injury_character_ids.is_empty()
+		else hospital_system.process_expedition_injuries_for_characters(
+			self,
+			true,
+			injury_character_ids
+		)
+	)
+	report["character_injury_results"] = injury_results.duplicate(true)
+	report["team_injury_summary"] = get_team_injury_summary()
+	last_expedition_report = report.duplicate(true)
+	emit_injury_result_signals(injury_results)
+	clear_expedition_meal_bonus()
+	restore_character_runtime_states_full()
+	rebuild_adventurers_from_character_data(false)
+	emit_resources_changed()
+	supplies_changed.emit()
+	expedition_state_changed.emit()
+	expedition_ended.emit(report.duplicate(true))
+	return {
+		"character_injury_results": injury_results,
+		"expedition_report": report,
+	}
 
 
 func _after_party_changed() -> void:

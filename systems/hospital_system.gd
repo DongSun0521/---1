@@ -178,9 +178,24 @@ func process_daily_hospital(game_state) -> Dictionary:
 
 
 func process_expedition_injuries(game_state, failure: bool, snapshots: Array = []) -> Array:
+	return process_expedition_injuries_for_characters(
+		game_state,
+		failure,
+		game_state.get_character_ids(),
+		snapshots
+	)
+
+
+func process_expedition_injuries_for_characters(
+	game_state,
+	failure: bool,
+	character_ids: Array,
+	snapshots: Array = []
+) -> Array:
 	var results: Array = []
 	if failure:
-		for character_id: StringName in game_state.get_character_ids():
+		for raw_character_id in character_ids:
+			var character_id := StringName(raw_character_id)
 			results.append(_apply_injury_result(game_state, character_id, 0, max(1, int(game_state.get_final_combat_stats(character_id).get("max_hp", 1))), &"expedition_failed", true))
 		return results
 

@@ -80,6 +80,7 @@ var game_state
 var input_locked: bool = false
 var pending_move_to_node_id: StringName = &""
 var current_team_node_id: StringName = &"village_exit"
+var battle_start_router: Callable
 var active_tween: Tween
 var boss_warning_dialog: ConfirmationDialog
 
@@ -493,9 +494,13 @@ func complete_pending_move() -> void:
 	if target_node_id == &"":
 		unlock_input()
 		return
-	game_state.move_to_next_expedition_node()
+	game_state.move_to_next_expedition_node(battle_start_router)
 	unlock_input()
 	refresh()
+
+
+func set_battle_start_router(router: Callable) -> void:
+	battle_start_router = router
 
 
 func gather_current_node() -> void:
