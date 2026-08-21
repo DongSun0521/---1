@@ -47,6 +47,7 @@
 | [`combat_v2_formal_party_mapping.md`](combat_v2_formal_party_mapping.md) | Combat V2-8C/R 正式队伍读取、属性尺度适配、动态角色与零写入验证 |
 | [`combat_v2_formal_settlement.md`](combat_v2_formal_settlement.md) | Combat V2-8D 正式结算验证、V1语义表与会话内幂等边界 |
 | [`combat_v2_main_merge_readiness.md`](combat_v2_main_merge_readiness.md) | Combat V2-8E Debug/Release隔离、正式遭遇支持矩阵、默认关闭路由与主干回滚准备 |
+| [`combat_v2_action_frequency_hardening.md`](combat_v2_action_frequency_hardening.md) | Combat V2-8G 正式攻速语义审计、递减收益行动频率映射与高等级压力验证 |
 
 Stage 8～10 的实现和测试入口没有单独阶段交接文件，已集中整理在
 [`codex_handoff_overall.md`](codex_handoff_overall.md)。

@@ -9,6 +9,16 @@ const FORMAL_REFERENCE_SOURCE := (
 	"CharacterDatabase._build_characters 当前四职业基础战斗属性（V2接口参考快照）"
 )
 
+# V1 attack_speed is an ordering-scale attribute, not attacks per second. V2
+# therefore maps its ratio against the profession reference onto the frozen V2
+# interval. Ratios above one use a C1-continuous saturating curve: the derivative
+# is one on both sides of the reference point, then decreases toward a maximum
+# 3x frequency. The absolute interval floor is only a final runtime safety net.
+const ACTION_FREQUENCY_REFERENCE_RATIO := 1.0
+const ACTION_FREQUENCY_MAX_MULTIPLIER := 3.0
+const ACTION_FREQUENCY_HIGH_RATIO_HALF_SATURATION := 2.0
+const ACTION_INTERVAL_SAFETY_FLOOR_SECONDS := 0.20
+
 # CharacterDatabase currently exposes definitions by character ID rather than a
 # profession-reference API. These profession-keyed values mirror the four formal
 # base definitions and are used only to convert between the V1 and V2 scales.
@@ -52,6 +62,57 @@ static func get_v2_baseline(v2_role_id: StringName) -> Dictionary:
 			0.0
 		)),
 		"action_interval": float(definition.get("action_interval", 0.0)),
+	}
+
+
+static func map_action_frequency(
+	formal_attack_speed: float,
+	reference_attack_speed: float,
+	baseline_action_interval: float
+) -> Dictionary:
+	if not _is_finite_positive(formal_attack_speed):
+		return _failure("正式角色攻速必须为有限正数")
+	if not _is_finite_positive(reference_attack_speed):
+		return _failure("正式职业参考攻速必须为有限正数")
+	if not _is_finite_positive(baseline_action_interval):
+		return _failure("冻结V2职业基准间隔必须为有限正数")
+	var raw_ratio := formal_attack_speed / reference_attack_speed
+	if not _is_finite_positive(raw_ratio):
+		return _failure("正式攻速比例必须为有限正数")
+	var frequency_multiplier := raw_ratio
+	if raw_ratio > ACTION_FREQUENCY_REFERENCE_RATIO:
+		var excess_ratio := raw_ratio - ACTION_FREQUENCY_REFERENCE_RATIO
+		var maximum_gain := ACTION_FREQUENCY_MAX_MULTIPLIER \
+			- ACTION_FREQUENCY_REFERENCE_RATIO
+		frequency_multiplier = ACTION_FREQUENCY_REFERENCE_RATIO \
+			+ maximum_gain * excess_ratio / (
+				ACTION_FREQUENCY_HIGH_RATIO_HALF_SATURATION + excess_ratio
+			)
+	if not _is_finite_positive(frequency_multiplier):
+		return _failure("递减收益曲线产生无效行动频率倍率")
+	var unclamped_interval := baseline_action_interval / frequency_multiplier
+	if not _is_finite_positive(unclamped_interval):
+		return _failure("行动频率映射产生无效V2行动间隔")
+	var safety_floor_applied := (
+		unclamped_interval < ACTION_INTERVAL_SAFETY_FLOOR_SECONDS
+	)
+	var final_interval := maxf(
+		ACTION_INTERVAL_SAFETY_FLOOR_SECONDS,
+		unclamped_interval
+	)
+	return {
+		"ok": true,
+		"errors": PackedStringArray(),
+		"value": {
+			"formal_attack_speed": formal_attack_speed,
+			"reference_attack_speed": reference_attack_speed,
+			"raw_ratio": raw_ratio,
+			"curved_frequency_multiplier": frequency_multiplier,
+			"unclamped_action_interval": unclamped_interval,
+			"final_action_interval": final_interval,
+			"safety_floor_seconds": ACTION_INTERVAL_SAFETY_FLOOR_SECONDS,
+			"safety_floor_applied": safety_floor_applied,
+		},
 	}
 
 
@@ -104,8 +165,19 @@ static func adapt_final_stats(
 	var runtime_hp_exact := float(v2_baseline["max_health"]) * hp_ratio
 	var runtime_effect_exact := float(v2_baseline["attack_or_heal"]) \
 		* attack_ratio
-	var runtime_interval := float(v2_baseline["action_interval"]) \
-		/ speed_ratio
+	var frequency_mapping := map_action_frequency(
+		float(formal_final_stats["attack_speed"]),
+		float(reference["attack_speed"]),
+		float(v2_baseline["action_interval"])
+	)
+	if not bool(frequency_mapping.get("ok", false)):
+		return _failure("行动频率映射失败：%s" % "; ".join(
+			frequency_mapping.get("errors", PackedStringArray())
+		))
+	var frequency_value: Dictionary = frequency_mapping.get("value", {})
+	var runtime_interval := float(frequency_value.get(
+		"final_action_interval", 0.0
+	))
 	if not _is_finite_positive(runtime_hp_exact):
 		return _failure("尺度转换产生无效V2最大生命：%s" % String(character_id))
 	if not _is_finite_nonnegative(runtime_effect_exact):
@@ -143,6 +215,7 @@ static func adapt_final_stats(
 			"attack": attack_ratio,
 			"attack_speed": speed_ratio,
 		},
+		"action_frequency_mapping": frequency_value.duplicate(true),
 		"v2_baseline_stats": v2_baseline.duplicate(true),
 		"v2_runtime_stats": {
 			"max_health": runtime_max_hp,

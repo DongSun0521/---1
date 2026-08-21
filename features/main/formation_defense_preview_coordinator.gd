@@ -22,6 +22,9 @@ const IntegrationPolicyScript := preload(
 const V2_PREVIEW_HOST_SCENE_PATH := (
 	"res://features/battle/formation_defense_preview_host.tscn"
 )
+const DEBUG_HIGH_LEVEL_OPTION_ID := 28050
+const DEBUG_HIGH_LEVEL_SOURCE_MODE := &"V2_8G_LEVEL_50_DEBUG_VALIDATION"
+const DEBUG_HIGH_LEVEL_ENTRY_NAME := "V2-8G Lv.50高等级节奏验证（不结算）"
 
 var game_state
 var overlay_parent: Control
@@ -42,6 +45,7 @@ var _last_preview_request: Dictionary = {}
 var _active_v2_mode: StringName = &""
 var _pending_settlement_context: Dictionary = {}
 var _debug_route_override_active := false
+var _debug_high_level_validation_selected := false
 
 
 func setup(
@@ -74,6 +78,10 @@ func on_battle_route_selected(option_index: int) -> void:
 	if not integration_policy.debug_tools_visible or battle_route_option == null:
 		return
 	_debug_route_override_active = true
+	_debug_high_level_validation_selected = (
+		battle_route_option.get_item_id(option_index)
+		== DEBUG_HIGH_LEVEL_OPTION_ID
+	)
 	var requested_mode := StringName(
 		battle_route_option.get_item_metadata(option_index)
 	)
@@ -82,6 +90,8 @@ func on_battle_route_selected(option_index: int) -> void:
 		_set_route_status("V1为默认正式路径；遭遇、奖励与进度保持原流程")
 	elif battle_router.current_mode == BattleRouterScript.MODE_V2_SETTLEMENT_VALIDATION:
 		_set_route_status("V2正式结算验证：仅真实未解决遭遇可用，会改变测试存档")
+	elif _debug_high_level_validation_selected:
+		_set_route_status("Lv.50纯数据压力队伍；冻结综合战；不读取正式队伍且不结算")
 	else:
 		_set_route_status("V2预览读取当前正式队伍与最终属性，但不执行结算")
 
@@ -95,7 +105,22 @@ func on_battle_route_start_pressed() -> void:
 	if game_state.is_battle_active():
 		_set_route_status("V1正式战斗进行中，不能并行启动预览")
 		return
-	var source_context := build_battle_route_source_context()
+	var source_context: Dictionary
+	if _debug_high_level_validation_selected:
+		var validation_party := FormalPartySource.build_debug_level_party_snapshots()
+		if not bool(validation_party.get("ok", false)):
+			_set_route_status("; ".join(validation_party.get(
+				"errors", ["Lv.50验证队伍无法构建"]
+			)))
+			return
+		source_context = {
+			"encounter_id": &"development:v2_8g_level_50_validation",
+			"encounter_node_id": "",
+			"source_mode": DEBUG_HIGH_LEVEL_SOURCE_MODE,
+			"party_snapshots": validation_party["value"].duplicate(true),
+		}
+	else:
+		source_context = build_battle_route_source_context()
 	if battle_router.current_mode == BattleRouterScript.MODE_V2_SETTLEMENT_VALIDATION:
 		_pending_settlement_context = source_context.duplicate(true)
 		settlement_confirmation_dialog.dialog_text = (
@@ -172,7 +197,18 @@ func route_formal_encounter(encounter_id: StringName) -> bool:
 
 func _start_selected_route(source_context: Dictionary) -> void:
 	if battle_router.current_mode != BattleRouterScript.MODE_V1:
-		var party_creation := FormalPartySource.build_party_snapshots(game_state)
+		var is_debug_level_fixture: bool = integration_policy.debug_tools_visible \
+			and StringName(source_context.get("source_mode", &"")) \
+				== DEBUG_HIGH_LEVEL_SOURCE_MODE
+		var party_creation: Dictionary
+		if is_debug_level_fixture:
+			party_creation = {
+				"ok": true,
+				"errors": PackedStringArray(),
+				"value": source_context.get("party_snapshots", []).duplicate(true),
+			}
+		else:
+			party_creation = FormalPartySource.build_party_snapshots(game_state)
 		if not bool(party_creation.get("ok", false)):
 			_set_route_status("; ".join(
 				party_creation.get("errors", ["正式队伍无法构建"])
@@ -180,7 +216,10 @@ func _start_selected_route(source_context: Dictionary) -> void:
 			return
 		source_context["party_snapshots"] = party_creation["value"].duplicate(true)
 		last_v2_party_debug_text = format_party_debug(
-			party_creation["value"]
+			party_creation["value"],
+			"V2-8G Lv.50高等级节奏验证（纯数据、不结算）"
+			if is_debug_level_fixture
+			else "正式队伍：%d人（V2-8C不结算预览）" % party_creation["value"].size()
 		)
 		if integration_policy.debug_tools_visible:
 			_set_route_status(last_v2_party_debug_text)
@@ -291,6 +330,10 @@ func format_v2_preview_summary(
 	lines.append("")
 	lines.append("V2-8C正式队伍预览未执行正式结算")
 	lines.append("正式角色经验、生命、装备、伤情、奖励、远征与存档均未写入。")
+	if StringName(context.get("source_mode", &"")) == DEBUG_HIGH_LEVEL_SOURCE_MODE:
+		lines.append("")
+		lines.append("V2-8G Lv.50行动频率诊断：")
+		lines.append(last_v2_party_debug_text)
 	return "\n".join(lines)
 
 
@@ -394,8 +437,11 @@ func format_v2_aborted_summary(
 	return "\n".join(lines)
 
 
-func format_party_debug(party: Array) -> String:
-	var lines := PackedStringArray(["正式队伍：%d人（V2-8C不结算预览）" % party.size()])
+func format_party_debug(party: Array, heading := "") -> String:
+	var resolved_heading: String = heading
+	if resolved_heading.is_empty():
+		resolved_heading = "正式队伍：%d人（V2-8C不结算预览）" % party.size()
+	var lines := PackedStringArray([resolved_heading])
 	for member: Dictionary in party:
 		var profession_id := StringName(member.get("profession_id", &""))
 		var compatibility := ProfessionCompatibility.get_compatibility(profession_id)
@@ -404,6 +450,7 @@ func format_party_debug(party: Array) -> String:
 		var formal: Dictionary = report.get("formal_final_stats", {})
 		var reference: Dictionary = report.get("formal_reference_stats", {})
 		var ratios: Dictionary = report.get("ratios", {})
+		var frequency: Dictionary = report.get("action_frequency_mapping", {})
 		var baseline: Dictionary = report.get("v2_baseline_stats", {})
 		var runtime: Dictionary = report.get("v2_runtime_stats", {})
 		var role_id := StringName(compatibility.get("v2_role_id", &""))
@@ -411,6 +458,7 @@ func format_party_debug(party: Array) -> String:
 			(
 				"槽%d %s[%s] %s→%s\n"
 			+ "  正式 HP%.1f/攻%.1f/速%.2f｜参考 %.1f/%.1f/%.2f｜比例 %.3f/%.3f/%.3f\n"
+			+ "  频率 原始%.3f→曲线%.3f｜间隔%.3fs｜安全下限%s\n"
 			+ "  V2基准 HP%.1f/%s%.1f/%.3fs｜运行 HP%d/%s%d/%.3fs｜范围%.0f"
 			)
 			% [
@@ -428,6 +476,10 @@ func format_party_debug(party: Array) -> String:
 				float(ratios.get("max_hp", 0.0)),
 				float(ratios.get("attack", 0.0)),
 				float(ratios.get("attack_speed", 0.0)),
+				float(frequency.get("raw_ratio", 0.0)),
+				float(frequency.get("curved_frequency_multiplier", 0.0)),
+				float(frequency.get("final_action_interval", 0.0)),
+				"已触发" if bool(frequency.get("safety_floor_applied", false)) else "未触发",
 				float(baseline.get("max_health", 0.0)),
 				"治疗" if role_id == &"doctor" else "攻击",
 				float(baseline.get("attack_or_heal", 0.0)),
@@ -606,7 +658,13 @@ func on_v2_preview_finished(result: Dictionary) -> void:
 			normalized_result,
 			_last_preview_request
 		)
-		v2_preview_summary_title.text = "Combat V2 接入预览结果"
+		v2_preview_summary_title.text = (
+			"V2-8G Lv.50高等级节奏验证结果（不结算）"
+			if StringName(_last_preview_request.get(
+				"encounter_context", {}
+			).get("source_mode", &"")) == DEBUG_HIGH_LEVEL_SOURCE_MODE
+			else "Combat V2 接入预览结果"
+		)
 		_set_route_status("V2预览已返回；正式数据与进度未结算")
 	v2_preview_summary_label.text = last_v2_preview_summary_text
 	_teardown_v2_preview_host()
@@ -706,9 +764,15 @@ func _build_route_controls(navigation: HBoxContainer) -> void:
 		1,
 		BattleRouterScript.MODE_V2_INTEGRATION_PREVIEW
 	)
-	battle_route_option.add_item("V2正式结算验证（会改变测试存档）")
+	battle_route_option.add_item(DEBUG_HIGH_LEVEL_ENTRY_NAME)
+	battle_route_option.set_item_id(2, DEBUG_HIGH_LEVEL_OPTION_ID)
 	battle_route_option.set_item_metadata(
 		2,
+		BattleRouterScript.MODE_V2_INTEGRATION_PREVIEW
+	)
+	battle_route_option.add_item("V2正式结算验证（会改变测试存档）")
+	battle_route_option.set_item_metadata(
+		3,
 		BattleRouterScript.MODE_V2_SETTLEMENT_VALIDATION
 	)
 	battle_route_option.select(0)
