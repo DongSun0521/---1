@@ -104,7 +104,8 @@ func check_debug_release_ui(game_state: Node) -> void:
 	var debug_coordinator = debug_fixture.coordinator
 	check(debug_fixture.navigation.get_node_or_null("BattleRouteDebug") != null, "Debug creates the development battle controls")
 	check(debug_coordinator.battle_route_option != null, "Debug creates a route selector")
-	check(debug_coordinator.battle_route_option.item_count == 3, "Debug keeps exactly the three established development modes")
+	check(debug_coordinator.battle_route_option.item_count == 4, "Debug keeps the established modes plus the V2-8G validation entry")
+	check(debug_coordinator.battle_route_option.get_item_text(2) == Coordinator.DEBUG_HIGH_LEVEL_ENTRY_NAME, "Debug names the V2-8G validation entry explicitly")
 	check(debug_coordinator.battle_route_option.get_item_metadata(0) == BattleRouter.MODE_V1, "Debug selector defaults to V1")
 	check(debug_coordinator.settlement_confirmation_dialog != null, "Debug creates the settlement validation warning")
 	check(debug_fixture.navigation.get_child_count() == 2, "Debug owns only its spacer and route box")
@@ -299,7 +300,7 @@ func check_merge_safety_files() -> void:
 	var readiness := FileAccess.get_file_as_string(
 		"res://docs/combat_v2_main_merge_readiness.md"
 	)
-	for phrase: String in ["约0.08秒", "Boss", "默认关闭", "正式美术", "回滚"]:
+	for phrase: String in ["0.254/0.288秒", "Boss", "默认关闭", "正式美术", "回滚"]:
 		check(readiness.contains(phrase), "merge readiness records blocker/rollback phrase %s" % phrase)
 
 

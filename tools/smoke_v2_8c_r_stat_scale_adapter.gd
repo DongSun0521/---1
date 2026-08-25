@@ -123,7 +123,15 @@ func check_scale_formula() -> void:
 		var enhanced: Dictionary = enhanced_creation.value.report.v2_runtime_stats
 		check(int(enhanced.max_health) == roundi(float(baseline.max_health) * 1.2), "%s +20%% formal HP gives +20%% V2 HP" % profession_id)
 		check(int(enhanced.attack_or_heal) == roundi(float(baseline.attack_or_heal) * 1.2), "%s +20%% formal attack gives +20%% V2 effect" % profession_id)
-		check(is_equal_approx(float(enhanced.action_interval), float(baseline.action_interval) / 1.2), "%s +20%% formal speed shortens V2 interval by 1/1.2" % profession_id)
+		var enhanced_frequency := StatScaleAdapter.map_action_frequency(
+			float(enhanced_stats.attack_speed),
+			float(reference.attack_speed),
+			float(baseline.action_interval)
+		)
+		check(is_equal_approx(
+			float(enhanced.action_interval),
+			float(enhanced_frequency.value.final_action_interval)
+		), "%s +20%% formal speed uses the hardened frequency curve" % profession_id)
 		var high_stats := formal_stats.duplicate(true)
 		high_stats.max_hp = float(reference.max_hp) * 5.0
 		high_stats.attack = float(reference.attack) * 5.0
@@ -132,7 +140,7 @@ func check_scale_formula() -> void:
 			&"high_level", profession_id, role_id, high_stats,
 			expected_ranges[index]
 		)
-		check(bool(high.get("ok", false)), "%s high growth sample stays finite without a hidden cap" % profession_id)
+		check(bool(high.get("ok", false)), "%s high growth sample stays finite under diminishing returns" % profession_id)
 		var formal_character_id: StringName = FORMAL_CHARACTER_BY_PROFESSION[profession_id]
 		var level_growth: Dictionary = Stage12Config.COMBAT_LEVEL_GROWTH_BY_CHARACTER[formal_character_id]
 		var level_span := float(Stage12Config.COMBAT_MAX_LEVEL - 1)
@@ -150,9 +158,15 @@ func check_scale_formula() -> void:
 		check(bool(max_level.get("ok", false)), "%s formal level-50 base growth sample stays finite" % profession_id)
 		if bool(max_level.get("ok", false)):
 			var max_level_runtime: Dictionary = max_level.value.report.v2_runtime_stats
-			var expected_max_interval := float(baseline.action_interval) \
-				* float(reference.attack_speed) / float(max_level_stats.attack_speed)
-			check(is_equal_approx(float(max_level_runtime.action_interval), expected_max_interval), "%s formal level-50 speed uses the same uncapped ratio" % profession_id)
+			var max_frequency := StatScaleAdapter.map_action_frequency(
+				float(max_level_stats.attack_speed),
+				float(reference.attack_speed),
+				float(baseline.action_interval)
+			)
+			check(is_equal_approx(
+				float(max_level_runtime.action_interval),
+				float(max_frequency.value.final_action_interval)
+			), "%s formal level-50 speed uses the hardened frequency curve" % profession_id)
 		if profession_id == &"ranger":
 			check(not is_equal_approx(float(runtime.action_interval), 1.0 / float(reference.attack_speed)), "raw formal attack_speed reciprocal is not used as the V2 interval")
 		if profession_id == &"healer":

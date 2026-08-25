@@ -8,6 +8,22 @@ const ProfessionCompatibility := preload(
 const StatScaleAdapter := preload(
 	"res://systems/formation_defense_stat_scale_adapter.gd"
 )
+const CharacterDatabaseScript := preload(
+	"res://scripts/data/character_database.gd"
+)
+const CharacterRosterScript := preload(
+	"res://systems/character_roster.gd"
+)
+const Stage12Config := preload(
+	"res://scripts/data/stage12_balance_config.gd"
+)
+
+const DEBUG_LEVEL_CHARACTER_ID_BY_FORMAL_ID := {
+	&"guard": &"v2_8g_lv50_guard",
+	&"hunter": &"v2_8g_lv50_ranger",
+	&"mage": &"v2_8g_lv50_mage",
+	&"doctor": &"v2_8g_lv50_healer",
+}
 
 
 ## Formal-side read boundary. Only this method reads CharacterRoster-backed GameState
@@ -52,6 +68,53 @@ static func build_party_snapshots(formal_game_state: Object) -> Dictionary:
 			"equipped_skill_ids": combat_data.get("skill_ids", []).duplicate(true),
 			"battle_visual_id": StringName(combat_data.get("battle_visual_id", &"")),
 			"injury_state": StringName(combat_data.get("injury_state", &"healthy")),
+		})
+	return build_party_snapshots_from_records(records)
+
+
+## Debug-only pure-data fixture. It deliberately creates a detached CharacterRoster
+## so the level growth and final-stat calculation follow the same formal data chain
+## without reading or impersonating the player's live CharacterRoster.
+static func build_debug_level_party_snapshots(
+	level: int = Stage12Config.COMBAT_MAX_LEVEL
+) -> Dictionary:
+	if level < 1 or level > Stage12Config.COMBAT_MAX_LEVEL:
+		return _failure("Debug验证队伍等级超出正式成长范围")
+	var database = CharacterDatabaseScript.new()
+	var detached_roster = CharacterRosterScript.new()
+	detached_roster.initialize_defaults(database)
+	var records: Array[Dictionary] = []
+	var formal_ids: Array[StringName] = database.get_party_order()
+	for party_slot: int in range(formal_ids.size()):
+		var formal_character_id := formal_ids[party_slot]
+		var definition = database.get_character_definition(formal_character_id)
+		var detached_record = detached_roster.get_character(formal_character_id)
+		if definition == null or detached_record == null:
+			return _failure("Debug验证队伍缺少正式角色定义")
+		var details: Dictionary = detached_record.combat_data.calculate_final_stat_details(
+			level,
+			{},
+			{},
+			{},
+			{}
+		)
+		var final_stats: Dictionary = {}
+		for stat_id: String in details.keys():
+			final_stats[stat_id] = details[stat_id].get("final", 0)
+		records.append({
+			"character_id": DEBUG_LEVEL_CHARACTER_ID_BY_FORMAL_ID[formal_character_id],
+			"character_type": CharacterEnums.CharacterType.COMBAT,
+			"display_name": "Lv.%d %s" % [level, String(definition.display_name)],
+			"profession_id": definition.profession_id,
+			"role_display_name": database.get_profession_display_name(
+				definition.profession_id
+			),
+			"party_slot": party_slot,
+			"is_in_party": true,
+			"final_stats": final_stats,
+			"equipped_skill_ids": definition.skill_ids.duplicate(),
+			"battle_visual_id": definition.battle_visual_id,
+			"injury_state": &"healthy",
 		})
 	return build_party_snapshots_from_records(records)
 
